@@ -271,3 +271,13 @@ De lokale 1.0 is bedoeld voor gebruik in een afgeschermde omgeving. Voor publica
 - Online eerste beheerder vereist `SCHITTER_SETUP_CODE` uit Render Environment.
 - Zonder die secret blijft de setup veilig gesloten.
 - Lokaal blijft de bestaande eerste-startcode werken.
+
+
+## 1.3.2 – Mail & branding
+- Centrale herbruikbare HTML-mailtemplate in Praktijk Schitter-stijl.
+- Huisstijlkleuren: roze, groen, lichtgroen en goud.
+- Logo wordt inline als CID-afbeelding meegestuurd en is niet afhankelijk van externe hosting.
+- Elke HTML-mail bevat ook een gewone tekstversie als fallback.
+- Testmail vernieuwd met status, verzendtijd, applicatienaam en versie.
+- Uitnodigingsmails gebruiken dezelfde huisstijl en een duidelijke knop om het wachtwoord in te stellen.
+- De mailbasis is herbruikbaar voor toekomstige signaleringen en workflowmails.

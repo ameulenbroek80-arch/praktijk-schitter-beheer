@@ -7,7 +7,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 BASE_DIR = Path(__file__).resolve().parent
-EXPECTED_VERSION = "1.3.1"
+EXPECTED_VERSION = "1.3.2"
 
 errors = []
 warnings = []
@@ -129,6 +129,16 @@ if 'IS_PRODUCTION and not expected_setup_code' not in source:
 render_text = (BASE_DIR / "render.yaml").read_text(encoding="utf-8")
 if "SCHITTER_SETUP_CODE" not in render_text or "sync: false" not in render_text:
     errors.append("1.3.1: Render setup-secret is niet handmatig geheim geconfigureerd.")
+
+# 1.3.2 Mail & branding checks.
+if "def _branded_email_html(" not in source:
+    errors.append("1.3.2: centrale HTML-mailtemplate ontbreekt.")
+if "msg.add_alternative(body_html" not in source:
+    errors.append("1.3.2: HTML-alternatief wordt niet aan e-mail toegevoegd.")
+if 'cid="<psb-logo>"' not in source:
+    errors.append("1.3.2: inline logo voor e-mail ontbreekt.")
+if "def _invite_email_content(" not in source:
+    errors.append("1.3.2: uitnodigingsmail gebruikt de nieuwe mailbasis niet.")
 
 print("Praktijk Schitter Beheer – SELFTEST")
 print("=" * 42)

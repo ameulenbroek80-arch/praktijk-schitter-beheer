@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import html as html_lib
 import io
 import json
 import mimetypes
@@ -82,7 +83,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -364,7 +365,126 @@ def employee_tab_available(tab: str) -> bool:
 # apart pakket voor e-mail toegevoegd: alles hier gebeurt met de
 # ingebouwde smtplib, zodat de app geen extra afhankelijkheden nodig heeft.
 
-def send_email(to_email: str, subject: str, body_text: str) -> tuple[bool, str | None]:
+
+def _branded_email_html(
+    *,
+    title: str,
+    message: str,
+    eyebrow: str = "",
+    button_label: str = "",
+    button_url: str = "",
+    details: list[tuple[str, str]] | None = None,
+    footer_note: str = "Dit is een automatisch verzonden bericht vanuit Praktijk Schitter Beheer.",
+) -> str:
+    """Bouw één herbruikbare, mailclient-vriendelijke Praktijk Schitter-template.
+
+    De opmaak gebruikt bewust inline CSS en tabellen: ouderwets voor websites,
+    maar nog steeds de betrouwbaarste aanpak voor Outlook en andere mailclients.
+    """
+    settings = load_settings()
+    app_name = settings.get("app_name", "Praktijk Schitter Beheer")
+    app_subtitle = settings.get("app_subtitle", "Bedrijfsmiddelen, toegang & registraties")
+
+    safe_title = html_lib.escape(title)
+    safe_message = html_lib.escape(message).replace("\n", "<br>")
+    safe_eyebrow = html_lib.escape(eyebrow)
+    safe_app_name = html_lib.escape(app_name)
+    safe_subtitle = html_lib.escape(app_subtitle)
+    safe_footer = html_lib.escape(footer_note)
+
+    detail_rows = ""
+    for label, value in details or []:
+        detail_rows += (
+            '<tr>'
+            f'<td style="padding:6px 0;color:#647477;font-size:13px;width:140px;vertical-align:top;">{html_lib.escape(str(label))}</td>'
+            f'<td style="padding:6px 0;color:#183235;font-size:13px;font-weight:700;vertical-align:top;">{html_lib.escape(str(value))}</td>'
+            '</tr>'
+        )
+
+    details_block = ""
+    if detail_rows:
+        details_block = (
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="margin:24px 0 0;background:#f5fbfa;border:1px solid #dceeed;border-radius:12px;">'
+            '<tr><td style="padding:16px 18px;">'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0">'
+            f'{detail_rows}'
+            '</table></td></tr></table>'
+        )
+
+    button_block = ""
+    if button_label and button_url:
+        safe_label = html_lib.escape(button_label)
+        safe_url = html_lib.escape(button_url, quote=True)
+        button_block = (
+            '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:26px 0 4px;">'
+            '<tr><td style="background:#17a5a3;border-radius:10px;">'
+            f'<a href="{safe_url}" style="display:inline-block;padding:13px 20px;color:#ffffff;'
+            'font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;text-decoration:none;">'
+            f'{safe_label}</a></td></tr></table>'
+        )
+
+    eyebrow_block = (
+        f'<div style="font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;'
+        f'color:#9d7629;margin-bottom:8px;">{safe_eyebrow}</div>'
+        if safe_eyebrow else ""
+    )
+
+    return f"""<!doctype html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
+<body style="margin:0;padding:0;background:#f3f6f6;font-family:Arial,Helvetica,sans-serif;color:#183235;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f6f6;padding:28px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e1eaea;">
+        <tr>
+          <td style="height:6px;background:linear-gradient(90deg,#eb6091 0 25%,#17a5a3 25% 50%,#82D5D1 50% 75%,#9d7629 75% 100%);font-size:0;">&nbsp;</td>
+        </tr>
+        <tr>
+          <td style="padding:26px 34px 18px;border-bottom:1px solid #edf1f1;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="vertical-align:middle;">
+                  <img src="cid:psb-logo" alt="{safe_app_name}" style="display:block;max-width:190px;max-height:70px;width:auto;height:auto;border:0;">
+                </td>
+                <td align="right" style="vertical-align:middle;color:#7a8a8d;font-size:11px;line-height:1.4;">
+                  {safe_subtitle}
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:34px;">
+            {eyebrow_block}
+            <h1 style="margin:0 0 14px;color:#183235;font-size:26px;line-height:1.25;">{safe_title}</h1>
+            <div style="font-size:15px;line-height:1.7;color:#4c6164;">{safe_message}</div>
+            {details_block}
+            {button_block}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:18px 34px;background:#f9fbfb;border-top:1px solid #edf1f1;color:#829093;font-size:11px;line-height:1.55;">
+            <strong style="color:#17a5a3;">{safe_app_name}</strong><br>
+            {safe_footer}
+          </td>
+        </tr>
+      </table>
+      <div style="max-width:640px;padding:14px 24px 0;color:#9aa5a7;font-size:10px;line-height:1.5;text-align:center;">
+        Dit bericht kan vertrouwelijke informatie bevatten. Deel het alleen met de bedoelde ontvanger.
+      </div>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+
+def send_email(
+    to_email: str,
+    subject: str,
+    body_text: str,
+    body_html: str | None = None,
+) -> tuple[bool, str | None]:
     if not to_email:
         return False, "Geen e-mailadres opgegeven."
 
@@ -375,7 +495,11 @@ def send_email(to_email: str, subject: str, body_text: str) -> tuple[bool, str |
     username = settings.get("smtp_username", "").strip()
     password = settings.get("smtp_password", "")
     from_email = settings.get("smtp_from_email", "").strip() or username
-    from_name = settings.get("smtp_from_name", "").strip() or settings.get("practice_name", "Praktijk Schitter")
+    from_name = (
+        settings.get("smtp_from_name", "").strip()
+        or settings.get("app_name", "").strip()
+        or "Praktijk Schitter Beheer"
+    )
 
     if not host or not from_email:
         return False, "E-mail is nog niet geconfigureerd (zie Instellingen › E-mail)."
@@ -391,6 +515,24 @@ def send_email(to_email: str, subject: str, body_text: str) -> tuple[bool, str |
     msg["To"] = to_email
     msg.set_content(body_text)
 
+    if body_html:
+        msg.add_alternative(body_html, subtype="html")
+        logo_path = BASE_DIR / "static" / "logo.png"
+        if logo_path.exists():
+            try:
+                html_part = msg.get_payload()[-1]
+                html_part.add_related(
+                    logo_path.read_bytes(),
+                    maintype="image",
+                    subtype="png",
+                    cid="<psb-logo>",
+                    filename="praktijk-schitter-logo.png",
+                    disposition="inline",
+                )
+            except Exception:
+                # Een ontbrekend/ongeldig logo mag e-mailverzending nooit blokkeren.
+                pass
+
     try:
         if encryption == "ssl":
             server = smtplib.SMTP_SSL(host, port, timeout=15)
@@ -403,9 +545,35 @@ def send_email(to_email: str, subject: str, body_text: str) -> tuple[bool, str |
                 server.login(username, password)
             server.send_message(msg)
         return True, None
-    except Exception as exc:  # smtplib/socket kunnen uiteenlopende fouten geven
+    except Exception as exc:
         return False, str(exc)
 
+
+def _invite_email_content(name: str, practice_name: str, link: str, hours_valid: int = 48) -> tuple[str, str]:
+    body_text = (
+        f"Hoi {name},\n\n"
+        f"Er is een account voor je aangemaakt in {practice_name}.\n\n"
+        f"Stel via deze link je wachtwoord in:\n{link}\n\n"
+        f"Deze link is {hours_valid} uur geldig. Heb je dit account niet verwacht, "
+        f"dan kun je deze e-mail negeren.\n\n"
+        f"Met vriendelijke groet,\n{practice_name}"
+    )
+    body_html = _branded_email_html(
+        eyebrow="Uitnodiging",
+        title=f"Welkom, {name}",
+        message=(
+            f"Er is een account voor je aangemaakt in {practice_name}. "
+            "Gebruik de knop hieronder om je eigen wachtwoord in te stellen."
+        ),
+        button_label="Wachtwoord instellen",
+        button_url=link,
+        details=[
+            ("Geldigheid link", f"{hours_valid} uur"),
+            ("Account", name),
+        ],
+        footer_note="Heb je dit account niet verwacht? Dan kun je deze e-mail veilig negeren.",
+    )
+    return body_text, body_html
 
 def _hash_invite_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -424,17 +592,6 @@ def _create_invite(user: dict, hours_valid: int = 48) -> str:
     # Zolang de uitnodiging openstaat, kan er sowieso niet mee ingelogd worden.
     user["password_hash"] = generate_password_hash(secrets.token_hex(32))
     return token
-
-
-def _invite_email_body(name: str, practice_name: str, link: str, hours_valid: int = 48) -> str:
-    return (
-        f"Hoi {name},\n\n"
-        f"Er is een account voor je aangemaakt in de applicatie van {practice_name}.\n\n"
-        f"Stel hier je wachtwoord in om toegang te krijgen:\n{link}\n\n"
-        f"Deze link is {hours_valid} uur geldig. Heb je dit account niet verwacht, "
-        f"dan kun je deze e-mail negeren.\n\n"
-        f"Met vriendelijke groet,\n{practice_name}"
-    )
 
 
 def load_users() -> list[dict]:
@@ -2117,10 +2274,12 @@ def user_add():
     save_users(users)
     practice_name = load_settings().get("practice_name", "Praktijk Schitter")
     invite_link = url_for("accept_invite", token=token, _external=True)
+    invite_text, invite_html = _invite_email_content(name, practice_name, invite_link)
     sent, error = send_email(
         email,
         f"Toegang tot {load_settings().get('app_name', 'Praktijk Schitter Beheer')}",
-        _invite_email_body(name, practice_name, invite_link),
+        invite_text,
+        invite_html,
     )
     log_action("user_invited", detail=email, target=role)
     if sent:
@@ -2148,10 +2307,12 @@ def user_resend_invite(user_id):
     save_users(users)
     practice_name = load_settings().get("practice_name", "Praktijk Schitter")
     invite_link = url_for("accept_invite", token=token, _external=True)
+    invite_text, invite_html = _invite_email_content(user.get("name", ""), practice_name, invite_link)
     sent, error = send_email(
         user["email"],
         f"Toegang tot {load_settings().get('app_name', 'Praktijk Schitter Beheer')}",
-        _invite_email_body(user.get("name", ""), practice_name, invite_link),
+        invite_text,
+        invite_html,
     )
     log_action("invite_resent", detail=user.get("email", ""))
     if sent:
@@ -2191,11 +2352,35 @@ def settings_email_save():
 @synchronized
 def settings_email_test():
     to = request.form.get("test_email", "").strip() or session.get("user_email", "")
+    settings = load_settings()
+    app_name = settings.get("app_name", "Praktijk Schitter Beheer")
+    sent_at = datetime.now().strftime("%d-%m-%Y om %H:%M")
+    test_text = (
+        f"Goed nieuws! De e-mailinstellingen van {app_name} werken.\n\n"
+        f"Dit testbericht is verzonden op {sent_at}.\n"
+        f"Versie: {APP_VERSION}\n\n"
+        "Je hoeft niets te doen."
+    )
+    test_html = _branded_email_html(
+        eyebrow="E-mailtest geslaagd",
+        title="De e-mailinstellingen werken 🎉",
+        message=(
+            "Dit testbericht is rechtstreeks vanuit de applicatie verzonden. "
+            "Als je dit ziet, is de SMTP-configuratie correct en kunnen toekomstige "
+            "signaleringen dezelfde huisstijl gebruiken."
+        ),
+        details=[
+            ("Verzonden", sent_at),
+            ("Applicatie", app_name),
+            ("Versie", APP_VERSION),
+        ],
+        footer_note="Dit is een testbericht. Je hoeft hierop niet te reageren.",
+    )
     sent, error = send_email(
         to,
-        "Testmail — Praktijk Schitter Beheer",
-        "Dit is een testbericht vanuit de applicatie. "
-        "Als je dit ontvangt, werkt de e-mailconfiguratie."
+        f"Testmail — {app_name}",
+        test_text,
+        test_html,
     )
     log_action("smtp_test_sent" if sent else "smtp_test_failed", detail=to)
     if sent:
