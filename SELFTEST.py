@@ -7,7 +7,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 BASE_DIR = Path(__file__).resolve().parent
-EXPECTED_VERSION = "1.3.0"
+EXPECTED_VERSION = "1.3.1"
 
 errors = []
 warnings = []
@@ -120,6 +120,15 @@ gitignore = (BASE_DIR / ".gitignore").read_text(encoding="utf-8") if (BASE_DIR /
 for needle in ("storage/*", "*.enc", "*.key", ".env"):
     if needle not in gitignore:
         errors.append(f"1.3: .gitignore mist bescherming voor {needle!r}.")
+
+# 1.3.1 secure online bootstrap checks.
+if 'SCHITTER_SETUP_CODE' not in source:
+    errors.append("1.3.1: SCHITTER_SETUP_CODE ondersteuning ontbreekt.")
+if 'IS_PRODUCTION and not expected_setup_code' not in source:
+    errors.append("1.3.1: online setup faalt niet veilig zonder setupcode.")
+render_text = (BASE_DIR / "render.yaml").read_text(encoding="utf-8")
+if "SCHITTER_SETUP_CODE" not in render_text or "sync: false" not in render_text:
+    errors.append("1.3.1: Render setup-secret is niet handmatig geheim geconfigureerd.")
 
 print("Praktijk Schitter Beheer – SELFTEST")
 print("=" * 42)

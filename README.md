@@ -266,3 +266,8 @@ De lokale 1.0 is bedoeld voor gebruik in een afgeschermde omgeving. Voor publica
 - Windows-startscript ruimt achtergebleven lokale Praktijk Schitter-processen op voordat een nieuwe versie start.
 - Nieuw `STOP_ALLE_PSB_WINDOWS.bat` om achtergebleven PSB-servers in één keer te stoppen.
 - Hardcoded oud versienummer in de consolemelding verwijderd; console gebruikt voortaan `APP_VERSION`.
+
+## 1.3.1 – veilige online eerste inrichting
+- Online eerste beheerder vereist `SCHITTER_SETUP_CODE` uit Render Environment.
+- Zonder die secret blijft de setup veilig gesloten.
+- Lokaal blijft de bestaande eerste-startcode werken.

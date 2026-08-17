@@ -13,6 +13,8 @@ services:
         value: /var/data
       - key: SCHITTER_SESSION_SECRET
         generateValue: true
+      - key: SCHITTER_SETUP_CODE
+        sync: false
     disk:
       name: praktijk-schitter-data
       mountPath: /var/data

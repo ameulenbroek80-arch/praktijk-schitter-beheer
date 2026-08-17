@@ -82,7 +82,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -462,13 +462,24 @@ def _generate_setup_code() -> str:
 
 
 def ensure_first_setup_code() -> str:
-    """Zorg dat er vóór de eerste beheerder precies één lokale setupcode bestaat."""
+    """Geef de eenmalige code voor de eerste beheerder terug.
+
+    Online komt deze uitsluitend uit SCHITTER_SETUP_CODE.
+    Lokaal blijft de bestaande eerste-startcode in storage werken.
+    """
     if load_users():
         try:
             SETUP_CODE_FILE.unlink(missing_ok=True)
         except OSError:
             pass
         return ""
+
+    env_code = os.environ.get("SCHITTER_SETUP_CODE", "").strip()
+    if IS_PRODUCTION:
+        return env_code
+    if env_code:
+        return env_code
+
     if SETUP_CODE_FILE.exists():
         try:
             for line in SETUP_CODE_FILE.read_text(encoding="utf-8").splitlines():
@@ -478,14 +489,13 @@ def ensure_first_setup_code() -> str:
                         return code
         except OSError:
             pass
+
     code = _generate_setup_code()
     SETUP_CODE_FILE.write_text(
-        "Praktijk Schitter Beheer — eenmalige eerste-startcode\n"
-        "\n"
+        "Praktijk Schitter Beheer — eenmalige eerste-startcode\n\n"
         "Deze code is alleen nodig om de ALLEREERSTE beheerder aan te maken.\n"
         "Na succesvolle configuratie wordt dit bestand automatisch verwijderd.\n"
-        "Deel deze code niet met medewerkers of onbevoegden.\n"
-        "\n"
+        "Deel deze code niet met medewerkers of onbevoegden.\n\n"
         f"CODE={code}\n",
         encoding="utf-8",
     )
@@ -494,7 +504,6 @@ def ensure_first_setup_code() -> str:
     except OSError:
         pass
     return code
-
 
 def verify_current_admin_password(password: str) -> bool:
     """Herbevestig gevoelige beheeracties met het wachtwoord van de huidige beheerder."""
@@ -2364,14 +2373,17 @@ def setup():
     if load_users():
         return redirect(url_for("login"))
 
-    ensure_first_setup_code()
+    expected_setup_code = ensure_first_setup_code()
+    if IS_PRODUCTION and not expected_setup_code:
+        flash("De online eerste inrichting is nog niet vrijgegeven. Stel SCHITTER_SETUP_CODE in bij Render → Environment.", "error")
+        return render_template("setup.html"), 503
 
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
         setup_code = request.form.get("setup_code", "").strip().upper()
-        expected_code = ensure_first_setup_code().strip().upper()
+        expected_code = expected_setup_code.strip().upper()
 
         if not secrets.compare_digest(setup_code, expected_code):
             log_action("setup_code_rejected", detail=email or "onbekend")
