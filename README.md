@@ -281,3 +281,13 @@ De lokale 1.0 is bedoeld voor gebruik in een afgeschermde omgeving. Voor publica
 - Testmail vernieuwd met status, verzendtijd, applicatienaam en versie.
 - Uitnodigingsmails gebruiken dezelfde huisstijl en een duidelijke knop om het wachtwoord in te stellen.
 - De mailbasis is herbruikbaar voor toekomstige signaleringen en workflowmails.
+
+
+## 1.3.3 – Branding & polish
+- Officiële copyrightnaam: **Praktijk Schitter**.
+- Dynamisch copyrightjaar in applicatie- en e-mailfooter.
+- Applicatiefooter is nu neutraal voor zowel lokaal als Render: `Beveiligde opslag`.
+- Vierkleurige huisstijllijn verplaatst naar de onderzijde van alle HTML-mails.
+- Huisstijllijn gebruikt vier echte tabelcellen in plaats van een CSS-gradient voor betere Outlook-compatibiliteit.
+- Verborgen preheader toegevoegd voor een nette onderwerp-preview in Outlook, Apple Mail en andere clients.
+- Extra mobiele/mailclient-meta toegevoegd zonder de bestaande visuele stijl te veranderen.

@@ -83,7 +83,8 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.3"
+COPYRIGHT_OWNER = "Praktijk Schitter"
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
@@ -375,15 +376,17 @@ def _branded_email_html(
     button_url: str = "",
     details: list[tuple[str, str]] | None = None,
     footer_note: str = "Dit is een automatisch verzonden bericht vanuit Praktijk Schitter Beheer.",
+    preheader: str = "",
 ) -> str:
     """Bouw één herbruikbare, mailclient-vriendelijke Praktijk Schitter-template.
 
-    De opmaak gebruikt bewust inline CSS en tabellen: ouderwets voor websites,
-    maar nog steeds de betrouwbaarste aanpak voor Outlook en andere mailclients.
+    Inline CSS + presentatietabellen blijven bewust de basis vanwege Outlook.
+    De vierkleurige huisstijllijn staat conform de huisstijl onderaan.
     """
     settings = load_settings()
     app_name = settings.get("app_name", "Praktijk Schitter Beheer")
     app_subtitle = settings.get("app_subtitle", "Bedrijfsmiddelen, toegang & registraties")
+    year = datetime.now().year
 
     safe_title = html_lib.escape(title)
     safe_message = html_lib.escape(message).replace("\n", "<br>")
@@ -391,6 +394,8 @@ def _branded_email_html(
     safe_app_name = html_lib.escape(app_name)
     safe_subtitle = html_lib.escape(app_subtitle)
     safe_footer = html_lib.escape(footer_note)
+    safe_owner = html_lib.escape(COPYRIGHT_OWNER)
+    safe_preheader = html_lib.escape(preheader or f"{title} — {app_name}")
 
     detail_rows = ""
     for label, value in details or []:
@@ -430,24 +435,39 @@ def _branded_email_html(
         if safe_eyebrow else ""
     )
 
+    # Geen CSS-gradient: vier echte cellen renderen betrouwbaarder in Outlook.
+    brand_line = (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">'
+        '<tr>'
+        '<td width="25%" height="6" style="background:#eb6091;font-size:0;line-height:0;">&nbsp;</td>'
+        '<td width="25%" height="6" style="background:#17a5a3;font-size:0;line-height:0;">&nbsp;</td>'
+        '<td width="25%" height="6" style="background:#82D5D1;font-size:0;line-height:0;">&nbsp;</td>'
+        '<td width="25%" height="6" style="background:#9d7629;font-size:0;line-height:0;">&nbsp;</td>'
+        '</tr></table>'
+    )
+
     return f"""<!doctype html>
 <html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width">
+  <meta name="x-apple-disable-message-reformatting">
+</head>
 <body style="margin:0;padding:0;background:#f3f6f6;font-family:Arial,Helvetica,sans-serif;color:#183235;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f6f6;padding:28px 12px;">
-    <tr><td align="center">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #e1eaea;">
-        <tr>
-          <td style="height:6px;background:linear-gradient(90deg,#eb6091 0 25%,#17a5a3 25% 50%,#82D5D1 50% 75%,#9d7629 75% 100%);font-size:0;">&nbsp;</td>
-        </tr>
+  <div style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;overflow:hidden;mso-hide:all;">
+    {safe_preheader}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;
+  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:#f3f6f6;">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;max-width:640px;background:#ffffff;border:1px solid #e1eaea;border-radius:18px;overflow:hidden;">
         <tr>
           <td style="padding:26px 34px 18px;border-bottom:1px solid #edf1f1;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
               <tr>
                 <td style="vertical-align:middle;">
-                  <img src="cid:psb-logo" alt="{safe_app_name}" style="display:block;max-width:190px;max-height:70px;width:auto;height:auto;border:0;">
+                  <img src="cid:psb-logo" alt="{safe_app_name}" width="190" style="display:block;max-width:190px;width:100%;height:auto;border:0;">
                 </td>
-                <td align="right" style="vertical-align:middle;color:#7a8a8d;font-size:11px;line-height:1.4;">
+                <td align="right" style="vertical-align:middle;color:#7a8a8d;font-size:11px;line-height:1.4;padding-left:16px;">
                   {safe_subtitle}
                 </td>
               </tr>
@@ -466,9 +486,11 @@ def _branded_email_html(
         <tr>
           <td style="padding:18px 34px;background:#f9fbfb;border-top:1px solid #edf1f1;color:#829093;font-size:11px;line-height:1.55;">
             <strong style="color:#17a5a3;">{safe_app_name}</strong><br>
-            {safe_footer}
+            {safe_footer}<br>
+            <span style="color:#9aa5a7;">© {year} {safe_owner}. Alle rechten voorbehouden.</span>
           </td>
         </tr>
+        <tr><td style="padding:0;">{brand_line}</td></tr>
       </table>
       <div style="max-width:640px;padding:14px 24px 0;color:#9aa5a7;font-size:10px;line-height:1.5;text-align:center;">
         Dit bericht kan vertrouwelijke informatie bevatten. Deel het alleen met de bedoelde ontvanger.
@@ -572,6 +594,7 @@ def _invite_email_content(name: str, practice_name: str, link: str, hours_valid:
             ("Account", name),
         ],
         footer_note="Heb je dit account niet verwacht? Dan kun je deze e-mail veilig negeren.",
+        preheader=f"Je account voor {practice_name} staat klaar. Stel binnen {hours_valid} uur je wachtwoord in.",
     )
     return body_text, body_html
 
@@ -773,6 +796,8 @@ def inject_app_configuration():
         "enabled_modules": load_module_settings(),
         "module_enabled": module_enabled,
         "app_version": APP_VERSION,
+        "copyright_owner": COPYRIGHT_OWNER,
+        "copyright_year": datetime.now().year,
     }
 
 
@@ -2375,6 +2400,7 @@ def settings_email_test():
             ("Versie", APP_VERSION),
         ],
         footer_note="Dit is een testbericht. Je hoeft hierop niet te reageren.",
+        preheader=f"E-mailtest geslaagd — de SMTP-configuratie van {app_name} werkt correct.",
     )
     sent, error = send_email(
         to,

@@ -7,7 +7,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 BASE_DIR = Path(__file__).resolve().parent
-EXPECTED_VERSION = "1.3.2"
+EXPECTED_VERSION = "1.3.3"
 
 errors = []
 warnings = []
@@ -139,6 +139,24 @@ if 'cid="<psb-logo>"' not in source:
     errors.append("1.3.2: inline logo voor e-mail ontbreekt.")
 if "def _invite_email_content(" not in source:
     errors.append("1.3.2: uitnodigingsmail gebruikt de nieuwe mailbasis niet.")
+
+# 1.3.3 Branding & polish checks.
+if 'COPYRIGHT_OWNER = "Praktijk Schitter"' not in source:
+    errors.append("1.3.3: officiële copyrightnaam ontbreekt.")
+if "preheader:" not in source or "mso-hide:all" not in source:
+    errors.append("1.3.3: e-mailpreheader ontbreekt.")
+if "background:linear-gradient" in source:
+    errors.append("1.3.3: oude gradient-huisstijllijn staat nog in de mailtemplate.")
+base_template = (BASE_DIR / "templates" / "base.html").read_text(encoding="utf-8")
+if "© {{ copyright_year }} {{ copyright_owner }}" not in base_template:
+    errors.append("1.3.3: copyright ontbreekt in applicatiefooter.")
+if "Gegevens lokaal opgeslagen in de programmamap" in base_template:
+    errors.append("1.3.3: online onjuiste lokale opslagtekst staat nog in footer.")
+
+# 1.3.3 application footer branding check.
+style_source = (BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
+if ".statusbar" not in style_source or "linear-gradient(90deg,var(--pink)" not in style_source:
+    errors.append("1.3.3: vierkleurige huisstijlbalk ontbreekt in applicatiefooter.")
 
 print("Praktijk Schitter Beheer – SELFTEST")
 print("=" * 42)

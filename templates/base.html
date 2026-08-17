@@ -71,7 +71,7 @@
     {% block content %}{% endblock %}
   </main>
 </div>
-<footer class="statusbar">🔒 Gegevens lokaal opgeslagen in de programmamap · v{{ app_version }}</footer>
+<footer class="statusbar">🔒 Beveiligde opslag · © {{ copyright_year }} {{ copyright_owner }} · v{{ app_version }}</footer>
 {% else %}
   {% block auth_content %}{% endblock %}
 {% endif %}
