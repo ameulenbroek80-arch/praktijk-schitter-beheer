@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% from "_macros.html" import choice_field %}
+{% block title %}Bedrijfsmiddelen · {{ app_name }}{% endblock %}
+{% block page_title %}Bedrijfsmiddelen{% endblock %}
+{% block page_subtitle %}Centrale inventaris van hardware en overige middelen.{% endblock %}
+{% block content %}
+<section class="stats-grid">
+  <div class="stat-card teal"><div class="stat-icon">▣</div><div><strong>{{ stats.total }}</strong><span>Totaal</span><small>middelen in inventaris</small></div></div>
+  <div class="stat-card pink"><div class="stat-icon">→</div><div><strong>{{ stats.issued }}</strong><span>Uitgegeven</span><small>gekoppeld aan medewerker</small></div></div>
+  <div class="stat-card aqua"><div class="stat-icon">✓</div><div><strong>{{ stats.free }}</strong><span>Vrij</span><small>direct beschikbaar</small></div></div>
+  <div class="stat-card gold"><div class="stat-icon">!</div><div><strong>{{ stats.attention }}</strong><span>Aandacht</span><small>reparatie of kwijt</small></div></div>
+</section>
+
+<div class="card">
+  <div class="card-header asset-toolbar">
+    <form class="search-form asset-search" method="get">
+      <input name="q" value="{{ q }}" placeholder="Zoek op middel, serienummer, medewerker…">
+      <select name="status">
+        <option value="">Alle statussen</option>
+        {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if status_filter==s else '' }}>{{ s }}</option>{% endfor %}
+      </select>
+      <select name="category">
+        <option value="">Alle typen</option>
+        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if category_filter==c else '' }}>{{ c }}</option>{% endfor %}
+      </select>
+      <button class="btn secondary">Filteren</button>
+    </form>
+    <button class="btn primary" type="button" onclick="document.getElementById('newAsset').showModal()">＋ Nieuw middel</button>
+  </div>
+
+  {% if assets %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Status</th><th>Type</th><th>Middel</th><th>Asset / serie</th><th>Toegewezen aan</th><th></th></tr></thead>
+      <tbody>
+      {% for a in assets %}
+      <tr>
+        <td><span class="asset-status status-{{ a.status|lower|replace(' ','-') }}">{{ a.status }}</span></td>
+        <td>{{ a.category }}</td>
+        <td><strong>{{ a.name }}</strong><br><small>{{ a.brand }} {{ a.model }}</small></td>
+        <td>{{ a.asset_number or a.serial_number or '—' }}</td>
+        <td>{{ a.employee_name or '—' }}</td>
+        <td><a class="btn secondary tiny" href="{{ url_for('asset_detail', asset_id=a.id) }}">Openen</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state"><div class="empty-icon">▣</div><h3>Geen middelen gevonden</h3><p>Voeg een bedrijfsmiddel toe of pas de filters aan.</p></div>
+  {% endif %}
+</div>
+
+<dialog id="newAsset" class="app-dialog">
+  <form method="post" action="{{ url_for('asset_central_add') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="dialog-head"><div><h2>Nieuw bedrijfsmiddel</h2><p>Voeg het middel toe aan de centrale inventaris.</p></div><button type="button" class="icon-btn" onclick="this.closest('dialog').close()">×</button></div>
+    <div class="form-grid">
+      {{ choice_field('asset_type', 'Type', settings.choice_lists.asset_type, required=True, placeholder='Ander type bedrijfsmiddel') }}
+      <label>Naam *<input name="name" required placeholder="bijv. MacBook Air receptie"></label>
+      <label>Merk<input name="brand"></label>
+      <label>Model<input name="model"></label>
+      <label>Assetnummer<input name="asset_number"></label>
+      <label>Serienummer<input name="serial_number"></label>
+      <label>IMEI<input name="imei"></label>
+      <label>Telefoonnummer<input name="phone_number"></label>
+      {{ choice_field('provider', 'Provider', settings.choice_lists.provider, placeholder='Andere provider') }}
+      {{ choice_field('os', 'Besturingssysteem', settings.choice_lists.os, placeholder='Ander besturingssysteem') }}
+      <label>PIN<input name="pin" autocomplete="off"></label>
+      <label>PUK<input name="puk" autocomplete="off"></label>
+      <label>Aankoopdatum<input type="date" name="purchase_date"></label>
+      <label>Garantie t/m<input type="date" name="warranty_until"></label>
+    </div>
+    <div class="section-title"><h3>Direct uitgeven <small>(optioneel)</small></h3></div>
+    <div class="form-grid">
+      <label>Medewerker<select name="assigned_employee_id"><option value="">Nog niet uitgeven</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.first_name }} {{ e.last_name }}</option>{% endfor %}</select></label>
+      <label>Uitgiftedatum<input type="date" name="issued_at"></label>
+      <label>Retour verwacht<input type="date" name="return_due"></label>
+    </div>
+    <label>Accessoires<textarea name="accessories" rows="2"></textarea></label>
+    <label>Notitie<textarea name="notes" rows="3"></textarea></label>
+    <div class="form-actions"><button type="button" class="btn secondary" onclick="this.closest('dialog').close()">Annuleren</button><button class="btn primary">Toevoegen</button></div>
+  </form>
+</dialog>
+{% endblock %}

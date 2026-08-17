@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block page_title %}Instellingen{% endblock %}
+{% block page_subtitle %}Praktijkinstellingen en gebruikersbeheer.{% endblock %}
+{% block content %}
+<div class="detail-grid">
+  <div class="card">
+    <div class="card-header"><div><h2>Praktijk</h2><p>Algemene instellingen</p></div></div>
+    <form id="practice-settings" class="inline-form" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Praktijknaam<input name="practice_name" value="{{ settings.get('practice_name','Praktijk Schitter') }}"></label>
+      <label>Applicatienaam<input name="app_name" value="{{ settings.get('app_name','Praktijk Schitter Beheer') }}"></label>
+      <label>Ondertitel<input name="app_subtitle" value="{{ settings.get('app_subtitle','Bedrijfsmiddelen, toegang & registraties') }}"></label>
+      <label>Domein<input name="domain" value="{{ settings.get('domain','') }}" placeholder="praktijkschitter.nl"></label>
+      <div class="form-grid">
+        <label>Contractsignalering dagen<input type="number" name="default_contract_warning_days" value="{{ settings.get('default_contract_warning_days','60') }}"></label>
+        <label>Registratiesignalering dagen<input type="number" name="default_registration_warning_days" value="{{ settings.get('default_registration_warning_days','90') }}"></label>
+      </div>
+      <button class="btn primary">Opslaan</button>
+    </form>
+  </div>
+
+
+  <div class="card module-settings-card">
+    <div class="card-header"><div><h2>Modules</h2><p>Zet onderdelen aan of uit zonder gegevens te verwijderen</p></div></div>
+    <div class="module-groups">
+      {% for group in ['Basis','HR','Portaal'] %}
+      <section class="module-group">
+        <h3>{{ group }}</h3>
+        {% for m in module_registry if m.group == group %}
+        <form class="module-switch-row module-switch-form" method="post" action="{{ url_for('settings_module_toggle', module_key=m.key) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="enabled" value="{{ '0' if module_settings.get(m.key) else '1' }}">
+          <span><strong>{{ m.label }}</strong><small>{{ m.description }}</small></span>
+          <label class="switch" title="{{ m.label }} aan- of uitzetten">
+            <input type="checkbox"
+                   aria-label="{{ m.label }} aan- of uitzetten"
+                   {% if module_settings.get(m.key) %}checked{% endif %}
+                   onchange="this.form.submit()">
+            <i></i>
+          </label>
+        </form>
+        {% endfor %}
+      </section>
+      {% endfor %}
+    </div>
+    <p class="hint module-hint">Wijzigingen worden <strong>direct opgeslagen</strong> en de pagina wordt daarna opnieuw geladen. Een module uitschakelen verbergt de functie en blokkeert de routes, maar wist geen bestaande gegevens.</p>
+  </div>
+
+
+  <div class="card">
+    <div class="card-header"><div><h2>E-mail (SMTP)</h2><p>Voor setup-links naar nieuwe gebruikers</p></div></div>
+    <p class="hint">
+      Bij STRATO gebruik je meestal server <code>smtp.strato.de</code>, poort <strong>465</strong> met SSL
+      (of poort 587 met STARTTLS), en als gebruikersnaam het volledige mailbox-adres. Test de instelling
+      hieronder voordat je een uitnodiging verstuurt.
+    </p>
+    <form class="inline-form" method="post" action="{{ url_for('settings_email_save') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-grid">
+        <label>SMTP-server<input name="smtp_host" value="{{ settings.get('smtp_host','') }}" placeholder="smtp.strato.de"></label>
+        <label>Poort<input type="number" name="smtp_port" value="{{ settings.get('smtp_port','465') }}"></label>
+        <label>Versleuteling
+          <select name="smtp_encryption">
+            {% set enc = settings.get('smtp_encryption','ssl') %}
+            <option value="ssl" {{ 'selected' if enc=='ssl' else '' }}>SSL (poort 465)</option>
+            <option value="starttls" {{ 'selected' if enc=='starttls' else '' }}>STARTTLS (poort 587)</option>
+            <option value="none" {{ 'selected' if enc=='none' else '' }}>Geen</option>
+          </select>
+        </label>
+        <label>Gebruikersnaam (mailbox)<input name="smtp_username" value="{{ settings.get('smtp_username','') }}" placeholder="info@praktijkschitter.nl"></label>
+        <label>Wachtwoord<input type="password" name="smtp_password" placeholder="{{ '•••••••• (laat leeg om te behouden)' if settings.get('smtp_password') else 'mailbox-wachtwoord' }}" autocomplete="new-password"></label>
+        <label>Afzender e-mailadres<input type="email" name="smtp_from_email" value="{{ settings.get('smtp_from_email','') }}" placeholder="info@praktijkschitter.nl"></label>
+        <label>Afzendernaam<input name="smtp_from_name" value="{{ settings.get('smtp_from_name','') }}" placeholder="Praktijk Schitter"></label>
+      </div>
+      <button class="btn primary" type="submit">E-mailinstellingen opslaan</button>
+    </form>
+    <form class="inline-form" method="post" action="{{ url_for('settings_email_test') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Testmail sturen naar<input type="email" name="test_email" value="{{ session.get('user_email','') }}"></label>
+      <button class="btn secondary" type="submit">✉ Testmail versturen</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div><h2>Data & back-up</h2><p>Exporteren en veiligstellen van gegevens</p></div></div>
+    <p class="hint">
+      De back-up bevat alle versleutelde gegevens <em>plus de sleutel</em> om ze te kunnen lezen.
+      Bewaar het gedownloade bestand daarom net zo veilig als de originele data, bijvoorbeeld in een
+      beveiligde back-uplocatie — niet los in een gedeelde map.
+    </p>
+    <div class="form-actions">
+      <a class="btn secondary" href="{{ url_for('settings_backup') }}">⬇ Back-up downloaden (.zip)</a>
+      <a class="btn secondary" href="{{ url_for('employees_export') }}">⬇ Medewerkers exporteren (.csv)</a>
+      <a class="btn secondary" href="{{ url_for('audit_log') }}">🕵 Auditlog bekijken</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div><h2>Keuzelijsten</h2><p>Vooringevulde keuzes voor formuliervelden</p></div></div>
+    <p class="hint">
+      Beheer hier de opties die als keuze verschijnen bij velden zoals functie, werklocatie, provider,
+      besturingssysteem en type opleiding/registratie. Staat de gewenste optie er niet bij, dan kan altijd
+      nog "Anders, namelijk…" ingevuld worden.
+    </p>
+    {% for f in choice_list_fields %}
+    <div class="choice-list-group">
+      <h3>{{ f.label }}</h3>
+      <div class="chip-list">
+        {% for opt in settings.choice_lists.get(f.key, []) %}
+        <form method="post" action="{{ url_for('choice_list_remove') }}" class="chip-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="field" value="{{ f.key }}">
+          <input type="hidden" name="value" value="{{ opt }}">
+          <button type="submit" class="chip" title="Optie verwijderen">{{ opt }} ×</button>
+        </form>
+        {% else %}
+        <span class="compact-empty">Nog geen opties ingesteld.</span>
+        {% endfor %}
+      </div>
+      <form method="post" action="{{ url_for('choice_list_add') }}" class="inline-form chip-add-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="field" value="{{ f.key }}">
+        <input type="text" name="value" placeholder="Nieuwe optie voor {{ f.label|lower }}">
+        <button class="btn secondary tiny" type="submit">＋ Toevoegen</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+
+
+  <div class="card">
+    <div class="card-header"><div><h2>Workflow-sjablonen</h2><p>Bepaal zelf welke stappen standaard in een indienst- of uitdienstworkflow komen</p></div></div>
+    <p class="hint">Nieuwe workflows gebruiken de lijst zoals die op dat moment is ingesteld. Bestaande workflows veranderen niet mee.</p>
+    {% for workflow_type, label in [('onboarding','Indienst'),('offboarding','Uitdienst')] %}
+    <div class="choice-list-group workflow-template-group">
+      <h3>{{ label }}</h3>
+      <div class="workflow-template-list">
+        {% for step in settings.workflow_templates.get(workflow_type, []) %}
+        <div class="workflow-template-row">
+          <span class="workflow-template-number">{{ loop.index }}</span><strong>{{ step }}</strong>
+          <form method="post" action="{{ url_for('workflow_template_move') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="workflow_type" value="{{ workflow_type }}"><input type="hidden" name="title" value="{{ step }}"><input type="hidden" name="direction" value="up"><button class="icon-btn" title="Omhoog" {{ 'disabled' if loop.first else '' }}>↑</button></form>
+          <form method="post" action="{{ url_for('workflow_template_move') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="workflow_type" value="{{ workflow_type }}"><input type="hidden" name="title" value="{{ step }}"><input type="hidden" name="direction" value="down"><button class="icon-btn" title="Omlaag" {{ 'disabled' if loop.last else '' }}>↓</button></form>
+          <form method="post" action="{{ url_for('workflow_template_remove') }}" onsubmit="return confirm('Deze standaardstap verwijderen?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="workflow_type" value="{{ workflow_type }}"><input type="hidden" name="title" value="{{ step }}"><button class="icon-btn danger" title="Verwijderen">×</button></form>
+        </div>
+        {% else %}<span class="compact-empty">Geen standaardstappen.</span>{% endfor %}
+      </div>
+      <form method="post" action="{{ url_for('workflow_template_add') }}" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="workflow_type" value="{{ workflow_type }}">
+        <input name="title" required placeholder="Nieuwe standaardstap"><button class="btn secondary tiny">＋ Toevoegen</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div><h2>Gebruikers</h2><p>Beheerders en medewerkers</p></div></div>
+    <div class="record-list">
+      {% for u in users %}
+      <div class="record-row user-wide">
+        <div><strong>{{ u.name }}</strong><span>{{ u.email }}</span></div>
+        <div>{{ u.role }}</div>
+        <div>
+          {% if u.employee_id %}Gekoppeld aan medewerker<br>{% endif %}
+          {% if u.get('invite_pending') %}<span class="badge-pending">Wacht op setup</span>{% endif %}
+        </div>
+        <div class="user-actions">
+          {% if u.get('invite_pending') %}
+          <form method="post" action="{{ url_for('user_resend_invite', user_id=u.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn secondary tiny" type="submit">Setup-link opnieuw sturen</button>
+          </form>
+          {% endif %}
+          <button type="button" class="btn secondary tiny" onclick="document.getElementById('reset-{{ u.id }}').classList.toggle('open')">Wachtwoord resetten</button>
+          {% if u.email != session.get('user_email') %}
+          <form method="post" action="{{ url_for('user_delete', user_id=u.id) }}" onsubmit="return confirm('Deze gebruiker verwijderen?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% if u.role == 'Beheerder' %}<input class="reauth-mini" type="password" name="admin_password" placeholder="jouw wachtwoord" required autocomplete="current-password">{% endif %}
+            <button class="icon-btn danger" type="submit" title="Verwijderen">×</button>
+          </form>
+          {% endif %}
+        </div>
+        <form id="reset-{{ u.id }}" class="inline-form reset-password-form" method="post" action="{{ url_for('user_reset_password', user_id=u.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>Nieuw tijdelijk wachtwoord<input type="password" name="new_password" minlength="10" required placeholder="minimaal 10 tekens"></label>
+          {% if u.role == 'Beheerder' %}<label>Bevestig met jouw wachtwoord<input type="password" name="admin_password" required autocomplete="current-password"></label>{% endif %}
+          <button class="btn primary tiny" type="submit">Wachtwoord instellen</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+
+    <form class="inline-form" method="post" action="{{ url_for('user_add') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h3>Gebruiker toevoegen</h3>
+      <label>Naam<input name="name" required></label>
+      <label>E-mailadres<input type="email" name="email" required></label>
+      <label>Rol
+        <select name="role" id="roleSelect">
+          <option>Beheerder</option>
+          <option>Medewerker</option>
+        </select>
+      </label>
+      <label id="employeeLink">Koppel aan medewerker
+        <select name="employee_id">
+          <option value="">Niet gekoppeld</option>
+          {% for e in employees %}<option value="{{ e.id }}">{{ e.first_name }} {{ e.last_name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Methode
+        {% set smtp_configured = settings.get('smtp_from_email') %}
+        <select name="method" id="methodSelect">
+          <option value="invite" {{ 'selected' if smtp_configured else '' }}>Setup-link per e-mail sturen (aanbevolen)</option>
+          <option value="manual" {{ 'selected' if not smtp_configured else '' }}>Zelf een tijdelijk wachtwoord instellen</option>
+        </select>
+        {% if not smtp_configured %}<small>Stel eerst e-mail hierboven in en test het, dan kun je deze methode gebruiken.</small>{% endif %}
+      </label>
+      <label id="manualPasswordField">Tijdelijk wachtwoord<input type="password" minlength="10" name="password"></label>
+      <label id="adminReauthField">Bevestig beheerdersactie met jouw huidige wachtwoord
+        <input type="password" name="admin_password" autocomplete="current-password">
+        <small>Verplicht wanneer je een nieuwe beheerder toevoegt.</small>
+      </label>
+      <button class="btn primary">Gebruiker toevoegen</button>
+    </form>
+  </div>
+</div>
+<script>
+const rs=document.getElementById('roleSelect'), el=document.getElementById('employeeLink');
+const ar=document.getElementById('adminReauthField'), arInput=ar.querySelector('input');
+function toggleEmployee(){
+  const employee = rs.value==='Medewerker';
+  el.style.display = employee ? 'flex' : 'none';
+  ar.style.display = employee ? 'none' : 'flex';
+  arInput.required = !employee;
+}
+rs.addEventListener('change',toggleEmployee); toggleEmployee();
+
+const ms=document.getElementById('methodSelect'), pw=document.getElementById('manualPasswordField'), pwInput=pw.querySelector('input');
+function toggleMethod(){
+  const manual = ms.value === 'manual';
+  pw.style.display = manual ? 'flex' : 'none';
+  pwInput.required = manual;
+}
+ms.addEventListener('change', toggleMethod); toggleMethod();
+</script>
+
+
+{% endblock %}

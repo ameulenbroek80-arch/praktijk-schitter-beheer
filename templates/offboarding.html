@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Uitdienst · {{ employee.first_name }} {{ employee.last_name }} · {{ app_name }}{% endblock %}
+{% block page_title %}Uitdienstworkflow{% endblock %}
+{% block page_subtitle %}{{ employee.first_name }} {{ employee.last_name }}{% endblock %}
+{% block content %}
+<div class="detail-header card">
+  <div class="profile-head">
+    <div class="big-avatar">{{ employee.first_name[:1] }}{{ employee.last_name[:1] }}</div>
+    <div><h2>{{ employee.first_name }} {{ employee.last_name }}</h2><p>{{ employee.function or 'Medewerker' }}</p>{% if workflow %}<span class="status {{ 'inactive' if workflow.status == 'Afgerond' else '' }}">{{ workflow.status }}</span>{% endif %}</div>
+  </div>
+  <a class="btn secondary" href="{{ url_for('employee_detail', employee_id=employee.id) }}">← Terug naar dossier</a>
+</div>
+
+{% if not workflow %}
+<div class="card workflow-start-card">
+  <div class="card-header"><div><h2>Uitdienstworkflow starten</h2><p>De checklist wordt automatisch opgebouwd uit wat nu aan deze medewerker gekoppeld is.</p></div></div>
+  <div class="workflow-preview-grid">
+    <div><strong>{{ assets|length }}</strong><span>bedrijfsmiddelen</span></div>
+    <div><strong>{{ credentials|length }}</strong><span>accounts/toegangen</span></div>
+    <div><strong>{{ registrations|length }}</strong><span>registraties</span></div>
+  </div>
+  <form class="inline-form" method="post" action="{{ url_for('offboarding_start', employee_id=employee.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Laatste werkdag<input type="date" name="last_working_day"></label>
+    <button class="btn primary">Workflow starten</button>
+  </form>
+</div>
+{% else %}
+{% set done_count = workflow['items']|selectattr('done')|list|length %}
+{% set total_count = workflow['items']|length %}
+<div class="card">
+  <div class="card-header">
+    <div><h2>Checklist</h2><p>{{ done_count }} van {{ total_count }} acties afgerond{% if workflow.last_working_day %} · laatste werkdag {{ workflow.last_working_day }}{% endif %}</p></div>
+    <span class="workflow-progress-label">{{ ((done_count / total_count * 100) if total_count else 100)|round|int }}%</span>
+  </div>
+  <div class="workflow-progress"><i style="width:{{ ((done_count / total_count * 100) if total_count else 100)|round|int }}%"></i></div>
+  <div class="workflow-checklist">
+    {% for item in workflow['items'] %}
+    <form class="workflow-item {{ 'done' if item.done else '' }}" method="post" action="{{ url_for('offboarding_toggle', employee_id=employee.id, item_id=item.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="workflow-check" title="Afvinken">{{ '✓' if item.done else '' }}</button>
+      <span class="workflow-kind">{% if item.kind == 'asset' %}▣{% elif item.kind == 'credential' %}🔑{% elif item.kind == 'registration' %}★{% else %}•{% endif %}</span>
+      <span><strong>{{ item.title }}</strong><small>{{ {'asset':'Bedrijfsmiddel','credential':'Account/toegang','registration':'Registratie','standard':'Algemeen'}.get(item.kind,'Actie') }}</small></span>
+    </form>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card danger-zone workflow-danger">
+  <div class="card-header"><div><h2>Workflow verwijderen</h2><p>Dit verwijdert alleen de checklist, niet het medewerkersdossier of gekoppelde gegevens.</p></div></div>
+  <form class="inline-form" method="post" action="{{ url_for('offboarding_reset', employee_id=employee.id) }}" onsubmit="return confirm('Uitdienstworkflow verwijderen?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn danger">Workflow verwijderen</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

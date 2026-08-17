@@ -1,0 +1,13 @@
+{% macro choice_field(field_key, label, options, current_value='', required=False, placeholder='Eigen invoer') %}
+<label>{{ label }}{% if required %} *{% endif %}
+  <select name="{{ field_key }}_choice" class="choice-select" data-other="other_{{ field_key }}">
+    <option value="">— Anders, namelijk hieronder —</option>
+    {% for opt in options %}
+    <option value="{{ opt }}" {{ 'selected' if current_value == opt else '' }}>{{ opt }}</option>
+    {% endfor %}
+  </select>
+  <input type="text" name="{{ field_key }}_other" id="other_{{ field_key }}" class="choice-other"
+         placeholder="{{ placeholder }}"
+         value="{{ current_value if current_value and current_value not in options else '' }}">
+</label>
+{% endmacro %}

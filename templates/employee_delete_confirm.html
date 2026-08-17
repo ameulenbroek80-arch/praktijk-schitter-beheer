@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block page_title %}Dossier verwijderen{% endblock %}
+{% block page_subtitle %}{{ employee.first_name }} {{ employee.last_name }}{% endblock %}
+{% block content %}
+<div class="card form-card danger-zone">
+  <div class="section-title"><h2>Dit kan niet ongedaan worden gemaakt</h2></div>
+  <p>
+    Je staat op het punt het volledige personeelsdossier van
+    <strong>{{ employee.first_name }} {{ employee.last_name }}</strong> definitief te verwijderen,
+    inclusief alle documenten, bedrijfsmiddelen, opleidingen/registraties en extra gegevens.
+  </p>
+  <p>
+    Urenregistraties en verlofaanvragen die al zijn ingediend, blijven bewaard voor de administratie
+    (bijvoorbeeld voor de bewaarplicht van loongegevens), maar zijn daarna niet meer aan een actief dossier gekoppeld.
+    Is er een medewerkersaccount aan dit dossier gekoppeld, dan wordt dat account ook verwijderd.
+  </p>
+  <form method="post" action="{{ url_for('employee_delete', employee_id=employee.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="confirm-checkbox">
+      <input type="checkbox" id="confirmDelete" required>
+      Ik heb dit gecontroleerd en wil dit dossier definitief verwijderen.
+    </label>
+    <div class="form-actions">
+      <a class="btn secondary" href="{{ url_for('employee_detail', employee_id=employee.id) }}">Annuleren</a>
+      <button class="btn danger" type="submit" id="confirmDeleteBtn" disabled>Dossier definitief verwijderen</button>
+    </div>
+  </form>
+</div>
+<script>
+const cb = document.getElementById('confirmDelete');
+const btn = document.getElementById('confirmDeleteBtn');
+cb.addEventListener('change', function(){ btn.disabled = !cb.checked; });
+</script>
+{% endblock %}

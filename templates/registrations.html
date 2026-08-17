@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% from "_macros.html" import choice_field %}
+{% block title %}Registraties · {{ app_name }}{% endblock %}
+{% block page_title %}Registraties{% endblock %}
+{% block page_subtitle %}Centrale bewaking van registraties, certificaten en verloopdata.{% endblock %}
+{% block content %}
+<section class="stats-grid">
+  <div class="stat-card teal"><div class="stat-icon">★</div><div><strong>{{ stats.total }}</strong><span>Totaal</span><small>registraties</small></div></div>
+  <div class="stat-card aqua"><div class="stat-icon">✓</div><div><strong>{{ stats.active }}</strong><span>Actief</span><small>geen directe actie</small></div></div>
+  <div class="stat-card gold"><div class="stat-icon">!</div><div><strong>{{ stats.expiring }}</strong><span>Loopt af</span><small>binnen waarschuwingstermijn</small></div></div>
+  <div class="stat-card pink"><div class="stat-icon">×</div><div><strong>{{ stats.expired }}</strong><span>Verlopen</span><small>actie nodig</small></div></div>
+</section>
+
+<div class="card">
+  <div class="card-header asset-toolbar">
+    <form class="search-form asset-search" method="get">
+      <input name="q" value="{{ q }}" placeholder="Zoek op medewerker, type, nummer, instantie…">
+      <select name="status">
+        <option value="">Alle statussen</option>
+        {% for s in ['Actief','Loopt af','Verlopen','Inactief'] %}<option value="{{ s }}" {{ 'selected' if status_filter==s else '' }}>{{ s }}</option>{% endfor %}
+      </select>
+      <button class="btn secondary">Filteren</button>
+    </form>
+    <button class="btn primary" type="button" onclick="document.getElementById('newRegistration').showModal()">＋ Registratie toevoegen</button>
+  </div>
+
+  {% if registrations %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Status</th><th>Medewerker</th><th>Registratie</th><th>Nummer</th><th>Geldig tot</th><th>Signalering</th><th></th></tr></thead>
+      <tbody>
+      {% for r in registrations %}
+      <tr>
+        <td><span class="registration-status reg-{{ r.display_status|lower|replace(' ','-') }}">{{ r.display_status }}</span></td>
+        <td><a class="text-link" href="{{ url_for('employee_detail', employee_id=r.employee_id, tab='registrations') }}">{{ r.employee_name }}</a></td>
+        <td><strong>{{ r.type }}</strong><br><small>{{ r.institution or '—' }}</small></td>
+        <td>{{ r.number or '—' }}</td>
+        <td>{{ r.expires_at or 'Geen einddatum' }}</td>
+        <td>{% if r.expires_at %}{{ r.warning_days_effective }} dagen{% else %}—{% endif %}</td>
+        <td><button class="btn secondary tiny" type="button" onclick="document.getElementById('edit-{{ r.id }}').showModal()">Wijzigen</button></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<div class="compact-empty">Geen registraties gevonden.</div>{% endif %}
+</div>
+
+<dialog id="newRegistration" class="app-dialog">
+  <form method="post" action="{{ url_for('registration_central_add') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="dialog-head"><div><h2>Registratie toevoegen</h2><p>Koppel een registratie aan een medewerker.</p></div><button type="button" class="icon-btn" onclick="this.closest('dialog').close()">×</button></div>
+    <label>Medewerker<select name="employee_id" required><option value="">Kies medewerker…</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.first_name }} {{ e.last_name }}</option>{% endfor %}</select></label>
+    {{ choice_field('registration_type', 'Type registratie', settings.choice_lists.registration_type, required=True, placeholder='Ander type') }}
+    <div class="form-grid">
+      <label>Nummer<input name="number"></label>
+      <label>Instantie<input name="institution"></label>
+      <label>Datum registratie<input type="date" name="obtained_at"></label>
+      <label>Geldig tot<input type="date" name="expires_at"></label>
+      <label>Waarschuwen vooraf (dagen)<input type="number" min="0" name="warning_days" placeholder="{{ settings.get('default_registration_warning_days','90') }}"></label>
+      <label>Status<select name="status"><option>Actief</option><option>Inactief</option></select></label>
+    </div>
+    <label>Notitie<textarea name="notes" rows="3"></textarea></label>
+    <div class="form-actions"><button type="button" class="btn secondary" onclick="this.closest('dialog').close()">Annuleren</button><button class="btn primary">Toevoegen</button></div>
+  </form>
+</dialog>
+
+{% for r in registrations %}
+<dialog id="edit-{{ r.id }}" class="app-dialog">
+  <form method="post" action="{{ url_for('registration_central_edit', registration_id=r.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="dialog-head"><div><h2>{{ r.type }}</h2><p>{{ r.employee_name }}</p></div><button type="button" class="icon-btn" onclick="this.closest('dialog').close()">×</button></div>
+    <div class="form-grid">
+      <label>Nummer<input name="number" value="{{ r.number }}"></label>
+      <label>Instantie<input name="institution" value="{{ r.institution }}"></label>
+      <label>Datum registratie<input type="date" name="obtained_at" value="{{ r.obtained_at }}"></label>
+      <label>Geldig tot<input type="date" name="expires_at" value="{{ r.expires_at }}"></label>
+      <label>Waarschuwen vooraf (dagen)<input type="number" min="0" name="warning_days" value="{{ r.warning_days }}"></label>
+      <label>Status<select name="status"><option {{ 'selected' if r.status=='Actief' else '' }}>Actief</option><option {{ 'selected' if r.status=='Inactief' else '' }}>Inactief</option></select></label>
+    </div>
+    <label>Notitie<textarea name="notes" rows="3">{{ r.notes }}</textarea></label>
+    <div class="form-actions">
+      <button type="button" class="btn secondary" onclick="this.closest('dialog').close()">Annuleren</button>
+      <button class="btn primary">Opslaan</button>
+    </div>
+  </form>
+  <form class="dialog-delete" method="post" action="{{ url_for('registration_central_delete', registration_id=r.id) }}" onsubmit="return confirm('Registratie definitief verwijderen?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn danger">Verwijderen</button>
+  </form>
+</dialog>
+{% endfor %}
+{% endblock %}

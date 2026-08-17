@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Indienst · {{ employee.first_name }} {{ employee.last_name }} · {{ app_name }}{% endblock %}
+{% block page_title %}Indienstworkflow{% endblock %}
+{% block page_subtitle %}{{ employee.first_name }} {{ employee.last_name }}{% endblock %}
+{% block content %}
+<div class="detail-header card">
+  <div class="profile-head">
+    <div class="big-avatar">{{ employee.first_name[:1] }}{{ employee.last_name[:1] }}</div>
+    <div><h2>{{ employee.first_name }} {{ employee.last_name }}</h2><p>{{ employee.function or 'Medewerker' }}</p>{% if workflow %}<span class="status {{ 'inactive' if workflow.status == 'Afgerond' else '' }}">{{ workflow.status }}</span>{% endif %}</div>
+  </div>
+  <a class="btn secondary" href="{{ url_for('employee_detail', employee_id=employee.id) }}">← Terug naar dossier</a>
+</div>
+{% if not workflow %}
+<div class="card workflow-start-card">
+  <div class="card-header"><div><h2>Indienstworkflow starten</h2><p>De checklist gebruikt jullie eigen workflow-sjabloon en vult dat aan met gegevens die al aan deze medewerker gekoppeld zijn.</p></div></div>
+  <form class="inline-form" method="post" action="{{ url_for('onboarding_start', employee_id=employee.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Startdatum<input type="date" name="start_date" value="{{ employee.get('start_date','') }}"></label>
+    <button class="btn primary">Workflow starten</button>
+  </form>
+</div>
+{% else %}
+{% set done_count = workflow['items']|selectattr('done')|list|length %}
+{% set total_count = workflow['items']|length %}
+<div class="card">
+  <div class="card-header"><div><h2>Checklist</h2><p>{{ done_count }} van {{ total_count }} acties afgerond{% if workflow.start_date %} · startdatum {{ workflow.start_date }}{% endif %}</p></div><span class="workflow-progress-label">{{ ((done_count / total_count * 100) if total_count else 100)|round|int }}%</span></div>
+  <div class="workflow-progress"><i style="width:{{ ((done_count / total_count * 100) if total_count else 100)|round|int }}%"></i></div>
+  <div class="workflow-checklist">
+    {% for item in workflow['items'] %}
+    <form class="workflow-item {{ 'done' if item.done else '' }}" method="post" action="{{ url_for('onboarding_toggle', employee_id=employee.id, item_id=item.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="workflow-check">{{ '✓' if item.done else '' }}</button>
+      <span class="workflow-kind">{% if item.kind == 'asset' %}▣{% elif item.kind == 'credential' %}🔑{% elif item.kind == 'registration' %}★{% else %}•{% endif %}</span>
+      <span><strong>{{ item.title }}</strong><small>{{ {'asset':'Bedrijfsmiddel','credential':'Account/toegang','registration':'Registratie','standard':'Sjabloonstap'}.get(item.kind,'Actie') }}</small></span>
+    </form>
+    {% endfor %}
+  </div>
+</div>
+<div class="card danger-zone workflow-danger">
+  <div class="card-header"><div><h2>Workflow verwijderen</h2><p>Alleen de checklist wordt verwijderd; het medewerkersdossier blijft intact.</p></div></div>
+  <form class="inline-form" method="post" action="{{ url_for('onboarding_reset', employee_id=employee.id) }}" onsubmit="return confirm('Indienstworkflow verwijderen?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn danger">Workflow verwijderen</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

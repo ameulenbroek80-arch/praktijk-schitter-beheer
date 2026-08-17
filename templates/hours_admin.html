@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block page_title %}Urenregistratie{% endblock %}
+{% block page_subtitle %}Overzicht van geregistreerde uren van alle medewerkers.{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header"><div><h2>Alle uren</h2><p>{{ entries|length }} registraties</p></div></div>
+  {% if entries %}<div class="table-wrap"><table><thead><tr><th>Datum</th><th>Medewerker</th><th>Uren</th><th>Soort</th><th>Omschrijving</th></tr></thead><tbody>
+  {% for e in entries %}<tr><td>{{ e.date }}</td><td><strong>{{ e.employee_name }}</strong></td><td>{{ e.hours }}</td><td>{{ e.category }}</td><td>{{ e.description }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="compact-empty">Nog geen uren geregistreerd.</div>{% endif %}
+</div>
+{% endblock %}

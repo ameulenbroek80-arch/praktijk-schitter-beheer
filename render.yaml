@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: praktijk-schitter-beheer
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 app:app
+    healthCheckPath: /api/health
+    envVars:
+      - key: SCHITTER_ENV
+        value: production
+      - key: SCHITTER_STORAGE_DIR
+        value: /var/data
+      - key: SCHITTER_SESSION_SECRET
+        generateValue: true
+    disk:
+      name: praktijk-schitter-data
+      mountPath: /var/data
+      sizeGB: 1

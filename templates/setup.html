@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Eerste configuratie · {{ app_name }}{% endblock %}
+{% block auth_content %}
+<div class="auth-page">
+  <div class="auth-card">
+    <img class="auth-logo" src="{{ url_for('static', filename='logo.png') }}" alt="{{ app_name }}">
+    <span class="eyebrow">Eerste configuratie</span>
+    <h1>Maak de eerste beheerder aan</h1>
+    <p>De eerste beheerder kan alleen worden aangemaakt met de eenmalige eerste-startcode die lokaal in de programmamap staat.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <form method="post" class="form-grid single">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Eerste-startcode
+        <input name="setup_code" required autofocus autocomplete="off" placeholder="PSB-XXXX-XXXX-XXXX">
+        <small>Open <code>storage/EERSTE_START_CODE.txt</code> op de computer waarop de app draait. Het bestand wordt na deze setup verwijderd.</small>
+      </label>
+      <label>Naam
+        <input name="name" required>
+      </label>
+      <label>E-mailadres
+        <input type="email" name="email" required>
+      </label>
+      <label>Wachtwoord
+        <input type="password" name="password" minlength="10" required>
+        <small>Minimaal 10 tekens.</small>
+      </label>
+      <button class="btn primary" type="submit">Beheerder aanmaken</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

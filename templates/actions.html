@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Actiecentrum · {{ app_name }}{% endblock %}
+{% block page_title %}Actiecentrum{% endblock %}
+{% block page_subtitle %}Alles wat aandacht nodig heeft, bij elkaar.{% endblock %}
+{% block content %}
+<section class="stats-grid">
+  <div class="stat-card teal"><div class="stat-icon">✦</div><div><strong>{{ counts.total }}</strong><span>Open acties</span><small>totaal</small></div></div>
+  <div class="stat-card pink"><div class="stat-icon">!</div><div><strong>{{ counts.danger }}</strong><span>Urgent</span><small>direct bekijken</small></div></div>
+  <div class="stat-card gold"><div class="stat-icon">◷</div><div><strong>{{ counts.warning }}</strong><span>Binnenkort</span><small>aandacht gewenst</small></div></div>
+  <div class="stat-card aqua"><div class="stat-icon">i</div><div><strong>{{ counts.info }}</strong><span>Ter informatie</span><small>niet urgent</small></div></div>
+</section>
+
+<div class="detail-grid">
+  <div class="card">
+    <div class="card-header">
+      <div><h2>Acties & signaleringen</h2><p>Automatisch verzameld uit de actieve modules</p></div>
+      <a class="btn primary" href="{{ url_for('tasks') }}">＋ Handmatige taak</a>
+    </div>
+    {% if items %}
+    <div class="action-center-list">
+      {% for item in items %}
+      <a class="action-center-row severity-{{ item.severity }}" href="{{ item.href }}">
+        <span class="action-center-icon">{% if item.source == 'registration' %}★{% elif item.source == 'asset' %}▣{% elif item.source == 'workflow' %}⇢{% elif item.source == 'task' %}✓{% else %}◷{% endif %}</span>
+        <span class="action-center-body"><strong>{{ item.title }}</strong><small>{{ item.detail }}{% if item.due_date %} · {{ item.due_date }}{% endif %}</small></span>
+        <span class="action-source">{{ {'registration':'Registratie','asset':'Bedrijfsmiddel','workflow':'Workflow','task':'Taak','contract':'Contract'}.get(item.source,item.source) }}</span>
+        <b>›</b>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">✓</div><h3>Geen openstaande acties</h3><p>Alles is op dit moment bijgewerkt.</p></div>
+    {% endif %}
+  </div>
+
+  <div class="side-stack">
+    <div class="card">
+      <div class="card-header"><div><h2>Workflows</h2><p>Gestarte uitdiensttrajecten</p></div></div>
+      {% set open_onboarding = onboarding_workflows|selectattr('status','ne','Afgerond')|list %}
+      {% set open_offboarding = offboarding_workflows|selectattr('status','ne','Afgerond')|list %}
+      {% if open_onboarding or open_offboarding %}
+      <div class="workflow-mini-list">
+        {% for w in open_onboarding %}
+        {% set open_count = w['items']|rejectattr('done')|list|length %}
+        <a href="{{ url_for('onboarding_detail', employee_id=w.employee_id) }}"><span class="attention-icon aqua-bg">＋</span><span><strong>Indienst · {{ w.employee_name }}</strong><small>{{ open_count }} acties open{% if w.start_date %} · start {{ w.start_date }}{% endif %}</small></span><b>›</b></a>
+        {% endfor %}
+        {% for w in open_offboarding %}
+        {% set open_count = w['items']|rejectattr('done')|list|length %}
+        <a href="{{ url_for('offboarding_detail', employee_id=w.employee_id) }}"><span class="attention-icon gold-bg">⇢</span><span><strong>Uitdienst · {{ w.employee_name }}</strong><small>{{ open_count }} acties open{% if w.last_working_day %} · laatste werkdag {{ w.last_working_day }}{% endif %}</small></span><b>›</b></a>
+        {% endfor %}
+      </div>
+      {% else %}<div class="compact-empty">Geen actieve workflows.</div>{% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div><h2>Hoe werkt dit?</h2><p>Geen extra administratie om de administratie.</p></div></div>
+      <div class="module-note">Registraties, retourdata, garanties en taken komen automatisch hier terecht. Een uitdienstworkflow start je vanuit het dossier van een medewerker.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}

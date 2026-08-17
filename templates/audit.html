@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block page_title %}Auditlog{% endblock %}
+{% block page_subtitle %}Wie deed wat, en wanneer. Laatste {{ entries|length }} van {{ total }} gebeurtenissen.{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header"><div><h2>Recente activiteit</h2><p>Meest recente eerst</p></div></div>
+  {% if entries %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Tijdstip</th><th>Gebruiker</th><th>Actie</th><th>Betreft</th></tr></thead>
+      <tbody>
+      {% for e in entries %}
+      <tr>
+        <td>{{ e.timestamp }}</td>
+        <td>{{ e.user }}</td>
+        <td>{{ e.action }}</td>
+        <td>{{ e.detail }}{% if e.target %} <small>({{ e.target }})</small>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="compact-empty">Nog geen activiteit gelogd.</div>
+  {% endif %}
+</div>
+{% endblock %}

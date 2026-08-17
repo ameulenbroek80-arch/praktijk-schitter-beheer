@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block page_title %}Mijn verlof{% endblock %}
+{% block page_subtitle %}Bekijk je saldo en vraag verlof aan.{% endblock %}
+{% block content %}
+<section class="stats-grid leave-stats">
+  <div class="stat-card teal"><div class="stat-icon">＋</div><div><strong>{{ '%.1f'|format(balance.entitlement) }}</strong><span>Jaarrecht</span><small>uren</small></div></div>
+  <div class="stat-card aqua"><div class="stat-icon">↻</div><div><strong>{{ '%.1f'|format(balance.carryover) }}</strong><span>Meegenomen</span><small>uren</small></div></div>
+  <div class="stat-card pink"><div class="stat-icon">✓</div><div><strong>{{ '%.1f'|format(balance.approved) }}</strong><span>Goedgekeurd</span><small>uren</small></div></div>
+  <div class="stat-card gold"><div class="stat-icon">＝</div><div><strong>{{ '%.1f'|format(balance.remaining) }}</strong><span>Beschikbaar</span><small>uren resterend</small></div></div>
+</section>
+<div class="detail-grid">
+  <div class="card">
+    <div class="card-header"><div><h2>Mijn aanvragen</h2><p>Status van verlofaanvragen</p></div></div>
+    {% if requests %}<div class="record-list">{% for r in requests %}<div class="record-row"><div><strong>{{ r.start_date }}{% if r.end_date %} t/m {{ r.end_date }}{% endif %}</strong><span>{{ r.status }}</span></div><div>{{ r.hours }} uur</div><div>{{ r.notes }}</div></div>{% endfor %}</div>{% else %}<div class="compact-empty">Nog geen verlof aangevraagd.</div>{% endif %}
+  </div>
+  <div class="card sticky-card">
+    <div class="card-header"><div><h2>Verlof aanvragen</h2><p>Nieuwe aanvraag</p></div></div>
+    <form class="inline-form" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-grid"><label>Van<input type="date" name="start_date" required></label><label>Tot<input type="date" name="end_date" required></label></div>
+      <label>Aantal verlofuren<input type="number" step="0.25" min="0.25" name="hours" required></label>
+      <label>Opmerking<textarea name="notes" rows="3"></textarea></label>
+      <button class="btn primary">Verlof aanvragen</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}{{ asset.name }} · {{ app_name }}{% endblock %}
+{% block page_title %}{{ asset.name }}{% endblock %}
+{% block page_subtitle %}{{ asset.category }} · {{ asset.status }}{% endblock %}
+{% block content %}
+<div class="detail-header card">
+  <div class="profile-head">
+    <div class="big-avatar">▣</div>
+    <div><h2>{{ asset.name }}</h2><p>{{ asset.brand }} {{ asset.model }}</p><span class="asset-status status-{{ asset.status|lower|replace(' ','-') }}">{{ asset.status }}</span></div>
+  </div>
+  <a class="btn secondary" href="{{ url_for('assets_overview') }}">← Inventaris</a>
+</div>
+
+<div class="detail-grid asset-detail-grid">
+  <div class="side-stack">
+    <div class="card">
+      <div class="card-header"><div><h2>Gegevens</h2><p>Identificatie en technische informatie</p></div></div>
+      <form class="inline-form" method="post" action="{{ url_for('asset_edit', asset_id=asset.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid">
+          <label>Type<input name="category" value="{{ asset.category }}"></label>
+          <label>Naam<input name="name" value="{{ asset.name }}" required></label>
+          <label>Merk<input name="brand" value="{{ asset.brand }}"></label>
+          <label>Model<input name="model" value="{{ asset.model }}"></label>
+          <label>Assetnummer<input name="asset_number" value="{{ asset.asset_number }}"></label>
+          <label>Serienummer<input name="serial_number" value="{{ asset.serial_number }}"></label>
+          <label>IMEI<input name="imei" value="{{ asset.imei }}"></label>
+          <label>Telefoonnummer<input name="phone_number" value="{{ asset.phone_number }}"></label>
+          <label>Provider<input name="provider" value="{{ asset.provider }}"></label>
+          <label>Besturingssysteem<input name="os" value="{{ asset.os }}"></label>
+          <label>Aankoopdatum<input type="date" name="purchase_date" value="{{ asset.purchase_date }}"></label>
+          <label>Garantie t/m<input type="date" name="warranty_until" value="{{ asset.warranty_until }}"></label>
+          <label>PIN
+            <div class="secret-display"><span id="pinSecret">••••</span>{% if asset.pin %}<button type="button" class="btn secondary tiny reveal-central-secret" data-field="pin" data-target="pinSecret">Tonen</button>{% endif %}</div>
+            <input name="pin_new" type="password" autocomplete="new-password" placeholder="{{ 'Nieuwe PIN invullen om te wijzigen' if asset.pin else 'PIN instellen' }}">
+          </label>
+          <label>PUK
+            <div class="secret-display"><span id="pukSecret">••••••••</span>{% if asset.puk %}<button type="button" class="btn secondary tiny reveal-central-secret" data-field="puk" data-target="pukSecret">Tonen</button>{% endif %}</div>
+            <input name="puk_new" type="password" autocomplete="new-password" placeholder="{{ 'Nieuwe PUK invullen om te wijzigen' if asset.puk else 'PUK instellen' }}">
+          </label>
+        </div>
+        {% if not asset.assigned_employee_id %}
+        <label>Status
+          <select name="status">{% for s in statuses %}{% if s != 'Uitgegeven' %}<option {{ 'selected' if asset.status==s else '' }}>{{ s }}</option>{% endif %}{% endfor %}</select>
+        </label>
+        {% endif %}
+        <label>Accessoires<textarea name="accessories" rows="2">{{ asset.accessories }}</textarea></label>
+        <label>Notitie<textarea name="notes" rows="3">{{ asset.notes }}</textarea></label>
+        <button class="btn primary">Gegevens opslaan</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div><h2>Uitgiftehistorie</h2><p>Wie heeft dit middel wanneer gehad?</p></div></div>
+      {% if asset.assignment_history %}
+      <div class="timeline">
+        {% for h in asset.assignment_history|reverse %}
+        <div class="timeline-item">
+          <span class="timeline-dot"></span>
+          <div><strong>{{ h.employee_name }}</strong><p>{{ h.assigned_at or 'Datum onbekend' }} → {{ h.returned_at or 'heden' }}</p>{% if h.note %}<small>{{ h.note }}</small>{% endif %}{% if h.return_note %}<small>Retour: {{ h.return_note }}</small>{% endif %}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="compact-empty">Dit middel is nog nooit uitgegeven.</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="side-stack">
+    <div class="card assignment-card">
+      <div class="card-header"><div><h2>Huidige toewijzing</h2><p>Status van dit middel</p></div></div>
+      {% if asset.assigned_employee_id %}
+        <div class="assignment-current">
+          <div class="big-check">→</div>
+          <h3>{{ asset.employee_name }}</h3>
+          <p>Het middel is momenteel uitgegeven.</p>
+          {% if asset.return_due %}<div class="due-box">Retour verwacht: <strong>{{ asset.return_due }}</strong></div>{% endif %}
+        </div>
+        <form class="inline-form" method="post" action="{{ url_for('asset_return', asset_id=asset.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>Retourdatum<input type="date" name="returned_at"></label>
+          <label>Status na retour<select name="next_status"><option>Vrij</option><option>Reparatie</option><option>Afgeschreven</option></select></label>
+          <label>Retournotitie<textarea name="return_note" rows="2" placeholder="Staat van apparaat, ontbrekende accessoires…"></textarea></label>
+          <button class="btn primary">Retour nemen</button>
+        </form>
+      {% else %}
+        <div class="assignment-current free"><div class="big-check">✓</div><h3>Niet uitgegeven</h3><p>Status: {{ asset.status }}</p></div>
+        {% if asset.status not in ['Afgeschreven','Kwijt'] %}
+        <form class="inline-form" method="post" action="{{ url_for('asset_assign', asset_id=asset.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>Medewerker<select name="employee_id" required><option value="">Kies medewerker…</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.first_name }} {{ e.last_name }}</option>{% endfor %}</select></label>
+          <div class="form-grid"><label>Uitgiftedatum<input type="date" name="issued_at"></label><label>Retour verwacht<input type="date" name="return_due"></label></div>
+          <label>Notitie<textarea name="assignment_note" rows="2"></textarea></label>
+          <button class="btn primary">Uitgeven</button>
+        </form>
+        {% endif %}
+      {% endif %}
+    </div>
+
+    <div class="card danger-zone">
+      <div class="card-header"><div><h2>Verwijderen</h2><p>Alleen voor foutief of definitief te verwijderen inventaris</p></div></div>
+      <form class="inline-form" method="post" action="{{ url_for('asset_central_delete', asset_id=asset.id) }}" onsubmit="return confirm('Dit bedrijfsmiddel definitief verwijderen? De historie gaat dan ook verloren.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn danger" {{ 'disabled' if asset.assigned_employee_id else '' }}>Definitief verwijderen</button>
+        {% if asset.assigned_employee_id %}<small>Neem het middel eerst retour.</small>{% endif %}
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.reveal-central-secret').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const target = document.getElementById(btn.dataset.target);
+    if (btn.dataset.revealed === '1') {
+      target.textContent = btn.dataset.field === 'pin' ? '••••' : '••••••••';
+      btn.textContent = 'Tonen';
+      btn.dataset.revealed = '0';
+      return;
+    }
+    const response = await fetch(`/assets/{{ asset.id }}/reveal/${btn.dataset.field}`, {
+      method: 'POST',
+      headers: {'X-Requested-With':'fetch'},
+      body: new URLSearchParams({'csrf_token':'{{ csrf_token() }}'})
+    });
+    const data = await response.json();
+    if (data.ok) {
+      target.textContent = data.value || '—';
+      btn.textContent = 'Verbergen';
+      btn.dataset.revealed = '1';
+    }
+  });
+});
+</script>
+{% endblock %}

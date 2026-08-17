@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% from "_macros.html" import choice_field %}
+{% block title %}{{ 'Medewerker wijzigen' if employee and not is_new else 'Nieuwe medewerker' }} · {{ app_name }}{% endblock %}
+{% block page_title %}{{ 'Medewerker wijzigen' if employee and not is_new else 'Nieuwe medewerker' }}{% endblock %}
+{% block page_subtitle %}Persoons- en contactgegevens{% if module_enabled('hr_employment') %}, aangevuld met dienstverbandgegevens{% endif %}.{% endblock %}
+
+{% block content %}
+<form method="post" class="card form-card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="section-title"><h2>Persoonsgegevens</h2><span>Basisgegevens van de medewerker</span></div>
+  <div class="form-grid">
+    <label>Voornaam *
+      <input name="first_name" value="{{ employee.first_name if employee else '' }}" required>
+    </label>
+    <label>Achternaam *
+      <input name="last_name" value="{{ employee.last_name if employee else '' }}" required>
+    </label>
+    <label>Privé e-mailadres
+      <input type="email" name="email" value="{{ employee.email if employee else '' }}">
+    </label>
+    <label>Privé telefoonnummer
+      <input name="phone" value="{{ employee.phone if employee else '' }}">
+    </label>
+    <label>Geboortedatum
+      <input type="date" name="birth_date" value="{{ employee.birth_date if employee else '' }}">
+    </label>
+  </div>
+
+  <div class="section-title"><h2>Adres & noodcontact</h2><span>Contactgegevens</span></div>
+  <div class="form-grid">
+    <label>Adres
+      <input name="address" value="{{ employee.address if employee else '' }}">
+    </label>
+    <label>Postcode
+      <input name="postal_code" value="{{ employee.postal_code if employee else '' }}">
+    </label>
+    <label>Woonplaats
+      <input name="city" value="{{ employee.city if employee else '' }}">
+    </label>
+    <label>Noodcontact naam
+      <input name="emergency_name" value="{{ employee.emergency_name if employee else '' }}">
+    </label>
+    <label>Noodcontact telefoon
+      <input name="emergency_phone" value="{{ employee.emergency_phone if employee else '' }}">
+    </label>
+  </div>
+
+  {% if module_enabled('hr_employment') %}
+  <div class="section-title"><h2>Dienstverband</h2><span>Praktische en contractuele gegevens</span></div>
+  <div class="form-grid">
+    {{ choice_field('function', 'Functie', settings.choice_lists.function, employee.function if employee else '', placeholder='Eigen functieomschrijving') }}
+    <label>Zakelijk e-mailadres
+      <input type="email" name="work_email" value="{{ employee.work_email if employee else '' }}">
+    </label>
+    <label>Datum in dienst
+      <input type="date" name="start_date" value="{{ employee.start_date if employee else '' }}">
+    </label>
+    <label>Einddatum contract
+      <input type="date" name="contract_end" value="{{ employee.contract_end if employee else '' }}">
+    </label>
+    <label>Uren per week
+      <input name="hours" value="{{ employee.hours if employee else '' }}" placeholder="bijv. 24">
+    </label>
+    <label>Type dienstverband
+      <select name="employment_type">
+        {% set et = employee.employment_type if employee else '' %}
+        <option value="" {{ 'selected' if et == '' else '' }}>Niet ingevuld</option>
+        <option {{ 'selected' if et == 'Bepaalde tijd' else '' }}>Bepaalde tijd</option>
+        <option {{ 'selected' if et == 'Onbepaalde tijd' else '' }}>Onbepaalde tijd</option>
+        <option {{ 'selected' if et == 'Oproep' else '' }}>Oproep</option>
+        <option {{ 'selected' if et == 'Stage' else '' }}>Stage</option>
+        <option {{ 'selected' if et == 'ZZP / extern' else '' }}>ZZP / extern</option>
+      </select>
+    </label>
+    <label>Salarisschaal / indicatie
+      <input name="salary_scale" value="{{ employee.salary_scale if employee else '' }}">
+    </label>
+    {{ choice_field('work_location', 'Werklocatie', settings.choice_lists.work_location, employee.work_location if employee else '', placeholder='Eigen locatie') }}
+    <label>Leidinggevende / aanspreekpunt
+      <input name="manager" value="{{ employee.manager if employee else '' }}">
+    </label>
+    <label>Status
+      <select name="status">
+        {% set current = employee.status if employee else 'In dienst' %}
+        <option {{ 'selected' if current == 'In dienst' else '' }}>In dienst</option>
+        <option {{ 'selected' if current == 'Uit dienst' else '' }}>Uit dienst</option>
+      </select>
+    </label>
+  </div>
+
+  </div>
+  {% endif %}
+
+  {% if module_enabled('leave') %}
+  <div class="section-title"><h2>Verlof</h2><span>Jaarlijks verlofrecht in uren</span></div>
+  <div class="form-grid">
+    <label>Jaarrecht verlof (uren)
+      <input type="number" step="0.25" name="annual_leave_hours" value="{{ employee.annual_leave_hours if employee else '0' }}">
+    </label>
+    <label>Meegenomen verlof (uren)
+      <input type="number" step="0.25" name="carryover_leave_hours" value="{{ employee.carryover_leave_hours if employee else '0' }}">
+    </label>
+  </div>
+  {% endif %}
+
+  <div class="section-title"><h2>Interne notitie</h2><span>Alleen zichtbaar voor beheerders</span></div>
+  <label>Notitie
+    <textarea name="notes" rows="5">{{ employee.notes if employee else '' }}</textarea>
+  </label>
+
+  <div class="form-actions">
+    <a class="btn secondary" href="{{ url_for('employees') if is_new else url_for('employee_detail', employee_id=employee.id) }}">Annuleren</a>
+    <button class="btn primary" type="submit">Opslaan</button>
+  </div>
+</form>
+{% endblock %}

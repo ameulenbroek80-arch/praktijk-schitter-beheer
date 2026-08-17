@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Afgesloten · {{ app_name }}{% endblock %}
+{% block auth_content %}
+<div class="auth-page">
+  <div class="auth-card">
+    <img class="auth-logo" src="{{ url_for('static', filename='logo.png') }}" alt="{{ app_name }}">
+    <h1>{{ app_name }} is afgesloten</h1>
+    <p>Je bent afgemeld en de lokale server wordt gestopt. Dit browservenster mag je sluiten.</p>
+    <div class="shutdown-icon">✓</div>
+  </div>
+</div>
+{% endblock %}

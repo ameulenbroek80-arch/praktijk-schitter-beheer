@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Wachtwoord instellen · {{ app_name }}{% endblock %}
+{% block auth_content %}
+<div class="auth-page">
+  <div class="auth-card">
+    <img class="auth-logo" src="{{ url_for('static', filename='logo.png') }}" alt="{{ app_name }}">
+    {% if invalid %}
+      <h1>Link niet geldig</h1>
+      {% if expired %}
+      <p>Deze setup-link is verlopen. Vraag een beheerder om een nieuwe link te sturen.</p>
+      {% else %}
+      <p>Deze setup-link is onbekend of al gebruikt. Vraag een beheerder om een nieuwe link te sturen.</p>
+      {% endif %}
+      <a class="btn primary" href="{{ url_for('login') }}">Naar het inlogscherm</a>
+    {% else %}
+      <span class="eyebrow">Welkom, {{ user.name }}</span>
+      <h1>Stel je wachtwoord in</h1>
+      <p>Kies een wachtwoord om toegang te krijgen tot {{ app_name }}.</p>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endwith %}
+
+      <form method="post" class="form-grid single">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Wachtwoord
+          <input type="password" name="password" minlength="10" required autocomplete="new-password" autofocus>
+          <small>Minimaal 10 tekens.</small>
+        </label>
+        <label>Wachtwoord herhalen
+          <input type="password" name="password_repeat" minlength="10" required autocomplete="new-password">
+        </label>
+        <button class="btn primary" type="submit">Wachtwoord instellen en inloggen</button>
+      </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

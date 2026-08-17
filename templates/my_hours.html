@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block page_title %}Mijn uren{% endblock %}
+{% block page_subtitle %}Registreer je gewerkte uren.{% endblock %}
+{% block content %}
+<div class="detail-grid">
+  <div class="card">
+    <div class="card-header"><div><h2>Urenregistratie</h2><p>Mijn geregistreerde uren</p></div></div>
+    {% if entries %}<div class="record-list">{% for e in entries %}<div class="record-row hours-row"><div><strong>{{ e.date }}</strong><span>{{ e.category }}</span></div><div>{{ e.hours }} uur</div><div>{{ e.description }}</div><form method="post" action="{{ url_for('my_hours_delete', entry_id=e.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-btn danger">×</button></form></div>{% endfor %}</div>{% else %}<div class="compact-empty">Nog geen uren geregistreerd.</div>{% endif %}
+  </div>
+  <div class="card sticky-card">
+    <div class="card-header"><div><h2>Uren toevoegen</h2><p>Nieuwe registratie</p></div></div>
+    <form class="inline-form" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Datum<input type="date" name="date" required></label>
+      <label>Aantal uren<input type="number" name="hours" step="0.25" min="0.25" max="24" required></label>
+      <label>Soort<select name="category"><option>Gewerkt</option><option>Opleiding</option><option>Administratie</option><option>Overig</option></select></label>
+      <label>Omschrijving<textarea name="description" rows="3"></textarea></label>
+      <button class="btn primary">Opslaan</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

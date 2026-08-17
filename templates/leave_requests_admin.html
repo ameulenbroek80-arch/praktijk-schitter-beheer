@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block page_title %}Verlofaanvragen{% endblock %}
+{% block page_subtitle %}Beoordeel aanvragen van medewerkers.{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header"><div><h2>Aanvragen</h2><p>Goedkeuren of afwijzen</p></div></div>
+  {% if requests %}<div class="table-wrap"><table><thead><tr><th>Medewerker</th><th>Periode</th><th>Uren</th><th>Status</th><th>Opmerking</th><th></th></tr></thead><tbody>
+  {% for r in requests %}<tr><td><strong>{{ r.employee_name }}</strong></td><td>{{ r.start_date }} t/m {{ r.end_date }}</td><td>{{ r.hours }}</td><td><span class="status">{{ r.status }}</span></td><td>{{ r.notes }}</td><td>{% if r.status=='In behandeling' %}<div class="action-row"><form method="post" action="{{ url_for('leave_request_decide',request_id=r.id,decision='approve') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn primary">Goedkeuren</button></form><form method="post" action="{{ url_for('leave_request_decide',request_id=r.id,decision='reject') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn secondary">Afwijzen</button></form></div>{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="compact-empty">Geen verlofaanvragen.</div>{% endif %}
+</div>
+{% endblock %}

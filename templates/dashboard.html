@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · {{ app_name }}{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}Goedemiddag, {{ session.get('user_name') }}. Hier zie je wat aandacht nodig heeft.{% endblock %}
+
+{% block content %}
+<section class="stats-grid">
+  <div class="stat-card teal">
+    <div class="stat-icon">👥</div>
+    <div><strong>{{ stats.total }}</strong><span>Medewerkers</span><small>{{ stats.active }} actief · {{ stats.inactive }} uit dienst</small></div>
+  </div>
+  {% if module_enabled('hr_employment') %}
+  <div class="stat-card pink">
+    <div class="stat-icon">◷</div>
+    <div><strong>{{ stats.expiring }}</strong><span>Contracten</span><small>lopen binnen 60 dagen af</small></div>
+  </div>
+  {% endif %}
+  {% if module_enabled('assets') %}
+  <div class="stat-card aqua">
+    <div class="stat-icon">💻</div>
+    <div><strong>{{ stats.assets }}</strong><span>Bedrijfsmiddelen</span><small>in de centrale inventaris</small></div>
+  </div>
+  {% endif %}
+  {% if module_enabled('signals') or module_enabled('registrations') or module_enabled('hr_employment') or module_enabled('assets') %}
+  <div class="stat-card gold">
+    <div class="stat-icon">✦</div>
+    <div><strong>{{ attention|length }}</strong><span>Aandachtspunten</span><small>actie aanbevolen</small></div>
+  </div>
+  {% endif %}
+</section>
+
+<section class="dashboard-grid">
+  <div class="card large">
+    <div class="card-header">
+      <div>
+        <h2>Medewerkers</h2>
+        <p>Actuele personeelsdossiers</p>
+      </div>
+      <a class="btn primary" href="{{ url_for('employee_new') }}">＋ Nieuwe medewerker</a>
+    </div>
+    {% if employees %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Naam</th><th>Functie</th>{% if module_enabled('hr_employment') %}<th>In dienst</th>{% endif %}{% if module_enabled('assets') %}<th>Middelen</th>{% endif %}<th>Status</th><th></th></tr></thead>
+        <tbody>
+        {% for e in employees[:8] %}
+          <tr>
+            <td><a class="person-link" href="{{ url_for('employee_detail', employee_id=e.id) }}">{% if e.photo %}<img class="mini-avatar-img" src="{{ url_for('employee_photo', employee_id=e.id) }}" alt="">{% else %}<span class="mini-avatar">{{ e.first_name[:1] }}{{ e.last_name[:1] }}</span>{% endif %}{{ e.first_name }} {{ e.last_name }}</a></td>
+            <td>{{ e.function or '—' }}</td>
+            {% if module_enabled('hr_employment') %}<td>{{ e.start_date or '—' }}</td>{% endif %}
+            {% if module_enabled('assets') %}<td>{{ asset_counts.get(e.id, 0) }}</td>{% endif %}
+            <td><span class="status {{ 'inactive' if e.status == 'Uit dienst' else '' }}">{{ e.status }}</span></td>
+            <td><a class="chevron" href="{{ url_for('employee_detail', employee_id=e.id) }}">›</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <a class="card-footer-link" href="{{ url_for('employees') }}">Bekijk alle medewerkers <span>›</span></a>
+    {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">✦</div>
+        <h3>Nog geen medewerkers</h3>
+        <p>Voeg de eerste medewerker toe om {{ app_name }} in gebruik te nemen.</p>
+        <a class="btn primary" href="{{ url_for('employee_new') }}">Eerste medewerker toevoegen</a>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="side-stack">
+    {% if module_enabled('signals') or module_enabled('registrations') or module_enabled('hr_employment') or module_enabled('assets') %}
+    <div class="card">
+      <div class="card-header"><div><h2>Aandachtspunten</h2><p>Actuele signaleringen</p></div></div>
+      {% if attention %}
+        <div class="attention-list">
+        {% for item in attention %}
+          <a href="{{ item.href }}">
+            <span class="attention-icon {{ 'pink-bg' if item.severity == 'danger' else ('gold-bg' if item.severity == 'warning' else 'aqua-bg') }}">{{ '◷' if item.kind == 'contract' else ('▣' if item.kind == 'asset' else ('✓' if item.kind == 'task' else '★')) }}</span>
+            <span><strong>{{ item.title }}</strong><small>{{ item.detail }}</small></span>
+            <b>›</b>
+          </a>
+        {% endfor %}
+        </div>
+      {% else %}
+        <div class="compact-empty">Geen urgente aandachtspunten 🎉</div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if module_enabled('documents') %}
+    <div class="card">
+      <div class="card-header"><div><h2>Recente documenten</h2><p>Laatst toegevoegd</p></div></div>
+      {% if recent_docs %}
+        <div class="document-list">
+        {% for d in recent_docs %}
+          <a href="{{ url_for('document_download', employee_id=d.employee_id, document_id=d.id) }}" target="_blank">
+            <span class="doc-icon">DOC</span>
+            <span><strong>{{ d.title }}</strong><small>{{ d.employee_name }} · {{ d.uploaded_at[:10] }}</small></span>
+          </a>
+        {% endfor %}
+        </div>
+      {% else %}
+        <div class="compact-empty">Nog geen documenten toegevoegd.</div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+{% from "_macros.html" import choice_field %}
+{% block title %}{{ employee.first_name }} {{ employee.last_name }} · Praktijk Schitter{% endblock %}
+{% block page_title %}{{ employee.first_name }} {{ employee.last_name }}{% endblock %}
+{% block page_subtitle %}{{ employee.function or 'Medewerker' }} · {{ employee.status }}{% endblock %}
+
+{% block content %}
+<div class="detail-header card">
+  <div class="profile-head">
+    <div class="big-avatar-wrap">
+      {% if employee.photo %}
+        <img class="big-avatar-img" src="{{ url_for('employee_photo', employee_id=employee.id) }}?v={{ employee.photo.uploaded_at }}" alt="Pasfoto {{ employee.first_name }} {{ employee.last_name }}">
+      {% else %}
+        <div class="big-avatar">{{ employee.first_name[:1] }}{{ employee.last_name[:1] }}</div>
+      {% endif %}
+      <div class="avatar-actions">
+        <form method="post" enctype="multipart/form-data" action="{{ url_for('employee_photo_upload', employee_id=employee.id) }}" id="photoUploadForm" class="avatar-upload-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="tab" value="{{ active_tab }}">
+          <input type="file" name="photo" accept="image/*" id="photoInput" hidden>
+          <button type="button" class="btn secondary tiny" onclick="document.getElementById('photoInput').click()">{{ 'Foto wijzigen' if employee.photo else 'Foto toevoegen' }}</button>
+        </form>
+        {% if employee.photo %}
+        <form method="post" action="{{ url_for('employee_photo_delete', employee_id=employee.id) }}" onsubmit="return confirm('Pasfoto verwijderen?')" class="avatar-delete-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="tab" value="{{ active_tab }}">
+          <button type="submit" class="icon-btn danger tiny" title="Foto verwijderen">×</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    <div>
+      <h2>{{ employee.first_name }} {{ employee.last_name }}</h2>
+      <p>{{ employee.function or 'Functie niet ingevuld' }}</p>
+      <span class="status {{ 'inactive' if employee.status == 'Uit dienst' else '' }}">{{ employee.status }}</span>
+    </div>
+  </div>
+  <div class="header-actions">
+    {% if module_enabled('signals') %}
+    <a class="btn secondary" href="{{ url_for('onboarding_detail', employee_id=employee.id) }}">＋ Indienstworkflow</a>
+    <a class="btn secondary" href="{{ url_for('offboarding_detail', employee_id=employee.id) }}">⇢ Uitdienstworkflow</a>
+    {% endif %}
+    <a class="btn primary" href="{{ url_for('employee_edit', employee_id=employee.id) }}">Basisgegevens wijzigen</a>
+    <a class="btn danger" href="{{ url_for('employee_delete_confirm', employee_id=employee.id) }}">Dossier verwijderen</a>
+  </div>
+</div>
+
+<div class="tabs">
+  <a class="{{ 'active' if active_tab == 'overview' else '' }}" href="{{ url_for('employee_detail', employee_id=employee.id, tab='overview') }}">Overzicht</a>
+  <a class="{{ 'active' if active_tab == 'personal' else '' }}" href="{{ url_for('employee_detail', employee_id=employee.id, tab='personal') }}">Persoonlijk</a>
+  {% if module_enabled('hr_employment') %}<a class="{{ 'active' if active_tab == 'employment' else '' }}" href="{{ url_for('employee_detail', employee_id=employee.id, tab='employment') }}">Dienstverband</a>{% endif %}
+  {% if module_enabled('assets') %}<a class="{{ 'active' if active_tab == 'assets' else '' }}" href="{{ url_for('employee_detail', employee_id=employee.id, tab='assets') }}">Bedrijfsmiddelen <span>{{ employee_assets|length }}</span></a>{% endif %}
+  {% if module_enabled('credentials') %}<a class="{{ 'active' if active_tab == 'credentials' else '' }}" href="{{ url_for('employee_detail', employee_id=employee.id, tab='credentials') }}">Accounts & codes <span>{{ employee_credentials|length }}</span></a>{% endif %}
+  {% if module_enabled('documents') %}<a class="{{ 'active' if active_tab == 'documents' else '' }}" href="{{ url_for('employee_detail', employee_id=employee.id, tab='documents') }}">Documenten <span>{{ employee.documents|length }}</span></a>{% endif %}
+  {% if module_enabled('registrations') %}<a class="{{ 'active' if active_tab == 'registrations' else '' }}" href="{{ url_for('employee_detail', employee_id=employee.id, tab='registrations') }}">Registraties <span>{{ employee_registrations|length }}</span></a>{% endif %}
+  <a class="{{ 'active' if active_tab == 'custom' else '' }}" href="{{ url_for('employee_detail', employee_id=employee.id, tab='custom') }}">Extra gegevens</a>
+  <a class="{{ 'active' if active_tab == 'notes' else '' }}" href="{{ url_for('employee_detail', employee_id=employee.id, tab='notes') }}">Notities</a>
+</div>
+
+{% if active_tab == 'overview' %}
+<div class="detail-grid">
+  <div class="card">
+    <div class="card-header"><div><h2>Samenvatting</h2><p>Belangrijkste gegevens</p></div></div>
+    <dl class="details-list">
+      <div><dt>Privé e-mail</dt><dd>{{ employee.email or '—' }}</dd></div>
+      <div><dt>Zakelijk e-mail</dt><dd>{{ employee.work_email or '—' }}</dd></div>
+      <div><dt>Telefoon</dt><dd>{{ employee.phone or '—' }}</dd></div>
+      {% if module_enabled('hr_employment') %}
+      <div><dt>Datum in dienst</dt><dd>{{ employee.start_date or '—' }}</dd></div>
+      <div><dt>Contract eindigt</dt><dd>{{ employee.contract_end or 'Onbepaalde tijd / niet ingevuld' }}</dd></div>
+      <div><dt>Uren per week</dt><dd>{{ employee.hours or '—' }}</dd></div>
+      {% endif %}
+      {% if module_enabled('assets') %}<div><dt>Bedrijfsmiddelen</dt><dd>{{ employee_assets|length }}</dd></div>{% endif %}
+      {% if module_enabled('credentials') %}<div><dt>Accounts & codes</dt><dd>{{ employee_credentials|length }}</dd></div>{% endif %}
+      {% if module_enabled('documents') %}<div><dt>Documenten</dt><dd>{{ employee.documents|length }}</dd></div>{% endif %}
+    </dl>
+  </div>
+  <div class="card">
+    <div class="card-header"><div><h2>Dossierstatus</h2><p>Wat zit er in dit dossier?</p></div></div>
+    <div class="quick-grid">
+      {% if module_enabled('assets') %}<a href="{{ url_for('employee_detail', employee_id=employee.id, tab='assets') }}"><strong>{{ employee_assets|length }}</strong><span>Bedrijfsmiddelen</span></a>{% endif %}
+      {% if module_enabled('credentials') %}<a href="{{ url_for('employee_detail', employee_id=employee.id, tab='credentials') }}"><strong>{{ employee_credentials|length }}</strong><span>Accounts & codes</span></a>{% endif %}
+      {% if module_enabled('documents') %}<a href="{{ url_for('employee_detail', employee_id=employee.id, tab='documents') }}"><strong>{{ employee.documents|length }}</strong><span>Documenten</span></a>{% endif %}
+      {% if module_enabled('registrations') %}<a href="{{ url_for('employee_detail', employee_id=employee.id, tab='registrations') }}"><strong>{{ employee_registrations|length }}</strong><span>Registraties</span></a>{% endif %}
+      <a href="{{ url_for('employee_detail', employee_id=employee.id, tab='custom') }}"><strong>{{ employee.custom_fields|length }}</strong><span>Extra velden</span></a>
+    </div>
+  </div>
+</div>
+
+{% elif active_tab == 'personal' %}
+<div class="card">
+  <div class="card-header"><div><h2>Persoonlijk & contact</h2><p>Persoonlijke gegevens en noodcontact</p></div><a class="btn secondary" href="{{ url_for('employee_edit', employee_id=employee.id) }}">Wijzigen</a></div>
+  <dl class="details-list wide">
+    <div><dt>Naam</dt><dd>{{ employee.first_name }} {{ employee.last_name }}</dd></div>
+    <div><dt>Geboortedatum</dt><dd>{{ employee.birth_date or '—' }}</dd></div>
+    <div><dt>Privé e-mail</dt><dd>{{ employee.email or '—' }}</dd></div>
+    <div><dt>Privé telefoon</dt><dd>{{ employee.phone or '—' }}</dd></div>
+    <div><dt>Adres</dt><dd>{{ employee.address or '—' }}</dd></div>
+    <div><dt>Postcode / woonplaats</dt><dd>{{ employee.postal_code }} {{ employee.city }}</dd></div>
+    <div><dt>Noodcontact</dt><dd>{{ employee.emergency_name or '—' }}</dd></div>
+    <div><dt>Telefoon noodcontact</dt><dd>{{ employee.emergency_phone or '—' }}</dd></div>
+  </dl>
+</div>
+
+{% elif active_tab == 'employment' %}
+<div class="card">
+  <div class="card-header"><div><h2>Dienstverband</h2><p>Praktische en contractuele informatie</p></div><a class="btn secondary" href="{{ url_for('employee_edit', employee_id=employee.id) }}">Wijzigen</a></div>
+  <dl class="details-list wide">
+    <div><dt>Functie</dt><dd>{{ employee.function or '—' }}</dd></div>
+    <div><dt>Zakelijk e-mailadres</dt><dd>{{ employee.work_email or '—' }}</dd></div>
+    <div><dt>Datum in dienst</dt><dd>{{ employee.start_date or '—' }}</dd></div>
+    <div><dt>Einddatum contract</dt><dd>{{ employee.contract_end or '—' }}</dd></div>
+    <div><dt>Type dienstverband</dt><dd>{{ employee.employment_type or '—' }}</dd></div>
+    <div><dt>Uren per week</dt><dd>{{ employee.hours or '—' }}</dd></div>
+    <div><dt>Salarisschaal / indicatie</dt><dd>{{ employee.salary_scale or '—' }}</dd></div>
+    <div><dt>Werklocatie</dt><dd>{{ employee.work_location or '—' }}</dd></div>
+    <div><dt>Leidinggevende</dt><dd>{{ employee.manager or '—' }}</dd></div>
+    <div><dt>Status</dt><dd>{{ employee.status }}</dd></div>
+  </dl>
+</div>
+
+{% elif active_tab == 'assets' %}
+<div class="card">
+  <div class="card-header">
+    <div><h2>Bedrijfsmiddelen</h2><p>Momenteel aan {{ employee.first_name }} toegewezen</p></div>
+    <a class="btn primary" href="{{ url_for('assets_overview') }}">Inventaris openen</a>
+  </div>
+  {% if employee_assets %}
+  <div class="asset-list">
+    {% for a in employee_assets %}
+    <a class="employee-asset-row" href="{{ url_for('asset_detail', asset_id=a.id) }}">
+      <span class="asset-type">{{ a.category }}</span>
+      <div><strong>{{ a.name }}</strong><small>{{ a.brand }} {{ a.model }}{% if a.asset_number %} · {{ a.asset_number }}{% endif %}</small></div>
+      <div class="employee-asset-meta"><span class="asset-status status-uitgegeven">Uitgegeven</span>{% if a.return_due %}<small>Retour {{ a.return_due }}</small>{% endif %}</div>
+      <b>›</b>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="compact-empty">Er zijn momenteel geen bedrijfsmiddelen aan deze medewerker toegewezen.</div>
+  {% endif %}
+  <div class="module-note">Nieuwe middelen, retouren en heruitgifte beheer je voortaan centraal via <a href="{{ url_for('assets_overview') }}"><strong>Bedrijfsmiddelen</strong></a>. Zo blijft de volledige uitgiftehistorie behouden.</div>
+</div>
+
+{% elif active_tab == 'credentials' %}
+<div class="card">
+  <div class="card-header">
+    <div><h2>Accounts & codes</h2><p>Persoonlijke accounts die aan deze medewerker zijn gekoppeld</p></div>
+    <a class="btn primary" href="{{ url_for('credentials') }}">Accounts beheren</a>
+  </div>
+  {% if employee_credentials %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Dienst</th><th>Type</th><th>Gebruikersnaam</th><th>Geheim</th><th></th></tr></thead>
+      <tbody>
+      {% for c in employee_credentials %}
+      <tr>
+        <td><strong>{{ c.service }}</strong>{% if c.url %}<br><small>{{ c.url }}</small>{% endif %}</td>
+        <td>{{ c.secret_type }}<br><small>{{ c.scope }}</small></td>
+        <td>{{ c.username or '—' }}</td>
+        <td><span class="secret" id="credential-secret-{{ c.id }}">••••••••</span></td>
+        <td><a class="btn secondary" href="{{ url_for('credentials') }}">Beheren</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="module-note">Geheimen worden bewust niet automatisch in het personeelsdossier geladen. Gebruik <strong>Accounts beheren</strong> om een code gecontroleerd te tonen of te kopiëren; dat wordt in de auditlog vastgelegd.</div>
+  {% else %}
+  <div class="compact-empty">Nog geen persoonlijk account aan deze medewerker gekoppeld. <a href="{{ url_for('credentials') }}">Account toevoegen</a></div>
+  {% endif %}
+</div>
+
+{% elif active_tab == 'documents' %}
+<div class="card">
+  <div class="card-header"><div><h2>Documenten</h2><p>Bestanden in het personeelsdossier · versleuteld opgeslagen</p></div></div>
+  <form class="upload-box" method="post" enctype="multipart/form-data" action="{{ url_for('document_upload', employee_id=employee.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <select name="doc_type">
+      <option>Arbeidsovereenkomst</option>
+      <option>VOG</option>
+      <option>Diploma</option>
+      <option>Identificatie</option>
+      <option>Functioneringsgesprek</option>
+      <option>Beoordeling</option>
+      <option>Verlof / verzuim</option>
+      <option>Overig</option>
+    </select>
+    <input type="file" name="document" required>
+    <button class="btn primary" type="submit">Document toevoegen</button>
+  </form>
+
+  {% if employee.documents %}
+  <div class="document-list bordered">
+    {% for d in employee.documents|reverse %}
+    <div class="document-row">
+      <a href="{{ url_for('document_download', employee_id=employee.id, document_id=d.id) }}" target="_blank">
+        <span class="doc-icon">DOC</span>
+        <span><strong>{{ d.title }}</strong><small>{{ d.type }} · {{ d.uploaded_at[:10] }} · door {{ d.uploaded_by }}</small></span>
+      </a>
+      <form method="post" action="{{ url_for('document_delete', employee_id=employee.id, document_id=d.id) }}" onsubmit="return confirm('Dit document definitief verwijderen?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="icon-btn danger" type="submit" title="Verwijderen">×</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="compact-empty">Nog geen documenten in dit dossier.</div>
+  {% endif %}
+</div>
+
+{% elif active_tab == 'registrations' %}
+<div class="card">
+  <div class="card-header">
+    <div><h2>Registraties</h2><p>Registraties en certificaten van {{ employee.first_name }}</p></div>
+    <a class="btn primary" href="{{ url_for('registrations_overview') }}">Centraal register openen</a>
+  </div>
+  {% if employee_registrations %}
+  <div class="record-list">
+    {% for r in employee_registrations %}
+    <div class="record-row">
+      <div><strong>{{ r.type }}</strong><span>{{ r.institution or 'Geen instantie ingevuld' }}</span></div>
+      <div>{{ r.number or '—' }}</div>
+      <div>{{ r.expires_at or 'Geen einddatum' }}</div>
+      <a class="btn secondary tiny" href="{{ url_for('registrations_overview', q=employee.first_name ~ ' ' ~ employee.last_name) }}">Beheren</a>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<div class="compact-empty">Nog geen registraties vastgelegd.</div>{% endif %}
+  <div class="module-note">Nieuwe registraties en wijzigingen beheer je centraal. Zo kunnen verloopdata en signaleringen praktijkbreed worden bewaakt.</div>
+</div>
+
+{% elif active_tab == 'custom' %}
+<div class="detail-grid">
+  <div class="card">
+    <div class="card-header"><div><h2>Extra gegevens</h2><p>Vrij definieerbare velden voor de praktijk</p></div></div>
+    <form class="inline-form" method="post" action="{{ url_for('custom_fields_save', employee_id=employee.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% if settings.custom_field_definitions %}
+        {% for f in settings.custom_field_definitions %}
+          <label>{{ f.label }} <small>{{ f.section }}</small>
+            {% if f.type == 'textarea' %}
+              <textarea name="custom_{{ f.id }}" rows="3">{{ employee.custom_fields.get(f.id,'') }}</textarea>
+            {% else %}
+              <input type="{{ f.type if f.type in ['date','number'] else 'text' }}" name="custom_{{ f.id }}" value="{{ employee.custom_fields.get(f.id,'') }}">
+            {% endif %}
+          </label>
+        {% endfor %}
+        <button class="btn primary" type="submit">Extra gegevens opslaan</button>
+      {% else %}
+        <div class="compact-empty">Nog geen extra velden gedefinieerd.</div>
+      {% endif %}
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div><h2>Nieuw veld maken</h2><p>Dit veld wordt daarna beschikbaar bij alle medewerkers</p></div></div>
+    <form class="inline-form" method="post" action="{{ url_for('custom_field_definition_add') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Naam veld *<input name="label" placeholder="bijv. Beroepsvereniging" required></label>
+      <label>Rubriek<input name="section" value="Extra gegevens"></label>
+      <label>Type
+        <select name="field_type">
+          <option value="text">Tekst</option>
+          <option value="date">Datum</option>
+          <option value="number">Getal</option>
+          <option value="textarea">Lange tekst</option>
+        </select>
+      </label>
+      <button class="btn primary" type="submit">Extra veld toevoegen</button>
+    </form>
+  </div>
+</div>
+
+{% elif active_tab == 'notes' %}
+<div class="card form-card">
+  <div class="section-title"><h2>Interne notities</h2><span>Alleen zichtbaar voor beheerders</span></div>
+  {% if employee.notes %}
+    <div class="note-box large-note"><p>{{ employee.notes }}</p></div>
+  {% else %}
+    <div class="compact-empty">Nog geen interne notitie toegevoegd.</div>
+  {% endif %}
+  <a class="btn secondary" href="{{ url_for('employee_edit', employee_id=employee.id) }}">Notitie wijzigen</a>
+</div>
+{% endif %}
+
+<script>
+const photoInput = document.getElementById('photoInput');
+if (photoInput) {
+  photoInput.addEventListener('change', function(){
+    if (photoInput.files && photoInput.files.length) {
+      document.getElementById('photoUploadForm').submit();
+    }
+  });
+}
+
+document.querySelectorAll('.reveal-btn').forEach(function(button){
+  button.addEventListener('click', function(){
+    const secret = button.parentElement.querySelector('.secret');
+    if (secret.dataset.revealed === '1') {
+      secret.textContent = button.dataset.field === 'puk' ? '••••••••' : '••••';
+      secret.dataset.revealed = '0';
+      button.textContent = 'Tonen';
+      return;
+    }
+    const url = '/employees/' + button.dataset.employee + '/assets/' + button.dataset.asset + '/reveal/' + button.dataset.field;
+    button.disabled = true;
+    fetch(url, {credentials: 'same-origin'})
+      .then(function(r){ if(!r.ok){ throw new Error('mislukt'); } return r.json(); })
+      .then(function(data){
+        secret.textContent = data.value || '—';
+        secret.dataset.revealed = '1';
+        button.textContent = 'Verbergen';
+      })
+      .catch(function(){ alert('Kon de waarde niet ophalen. Ververs de pagina en probeer het opnieuw.'); })
+      .finally(function(){ button.disabled = false; });
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Nooit praktijkgegevens, sleutels of logs in Git
+storage/*
+!storage/documents/
+storage/documents/*
+!storage/documents/.gitkeep
+
+*.enc
+*.key
+users.json
+EERSTE_START_CODE.txt
+setup_token.txt
+app.log
+audit.log
+.server.pid
+.server.port
