@@ -7,7 +7,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 BASE_DIR = Path(__file__).resolve().parent
-EXPECTED_VERSION = "1.3.3"
+EXPECTED_VERSION = "1.3.4"
 
 errors = []
 warnings = []
@@ -155,8 +155,10 @@ if "Gegevens lokaal opgeslagen in de programmamap" in base_template:
 
 # 1.3.3 application footer branding check.
 style_source = (BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
-if ".statusbar" not in style_source or "linear-gradient(90deg,var(--pink)" not in style_source:
-    errors.append("1.3.3: vierkleurige huisstijlbalk ontbreekt in applicatiefooter.")
+if ".statusbar::after" not in style_source or "linear-gradient(90deg,var(--pink)" not in style_source:
+    errors.append("1.3.4: dunne vierkleurige huisstijllijn ontbreekt onder de applicatiefooter.")
+if ".statusbar{position:fixed" not in style_source or "background:#fff" not in style_source:
+    errors.append("1.3.4: rustige lichte applicatiefooter ontbreekt.")
 
 print("Praktijk Schitter Beheer – SELFTEST")
 print("=" * 42)

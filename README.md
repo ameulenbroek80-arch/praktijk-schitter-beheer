@@ -291,3 +291,10 @@ De lokale 1.0 is bedoeld voor gebruik in een afgeschermde omgeving. Voor publica
 - Huisstijllijn gebruikt vier echte tabelcellen in plaats van een CSS-gradient voor betere Outlook-compatibiliteit.
 - Verborgen preheader toegevoegd voor een nette onderwerp-preview in Outlook, Apple Mail en andere clients.
 - Extra mobiele/mailclient-meta toegevoegd zonder de bestaande visuele stijl te veranderen.
+
+
+## 1.3.4 – Footer polish
+- Applicatiefooter rustiger gemaakt: lichte achtergrond en subtiele tekst.
+- De vier huisstijlkleuren staan nu als dunne lijn onderaan de footer.
+- Copyright en versie blijven centraal zichtbaar.
+- Geen functionele wijzigingen.
