@@ -298,3 +298,14 @@ De lokale 1.0 is bedoeld voor gebruik in een afgeschermde omgeving. Voor publica
 - De vier huisstijlkleuren staan nu als dunne lijn onderaan de footer.
 - Copyright en versie blijven centraal zichtbaar.
 - Geen functionele wijzigingen.
+
+
+## 1.3.5 – Mobile & identity
+- Responsive mobiele navigatie met hamburgerknop en uitschuifbare zijbalk.
+- Uitloggen en wachtwoord wijzigen zijn op mobiel altijd bereikbaar.
+- Mobiele formulieren, kaarten, actieknoppen en tabellen verbeterd.
+- Brede tabellen kunnen op klein scherm horizontaal scrollen.
+- iOS-zoom bij invoervelden verminderd door mobiele 16px invoertekst.
+- Favicon `Sterren.ico` toegevoegd voor het eigen subdomein.
+- Software-copyright gewijzigd naar **AM | Software as a Hobby**.
+- Praktijk Schitter blijft de praktijk-/productcontext; de software-identiteit staat los daarvan.

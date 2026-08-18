@@ -4,14 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <meta name="theme-color" content="#17a5a3">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 {% if session.get('user_email') %}
 <div class="app-shell">
-  <aside class="sidebar">
+  <aside class="sidebar" id="app-sidebar" aria-label="Hoofdnavigatie">
     <div class="logo-wrap">
       <img src="{{ url_for('static', filename='logo.png') }}" alt="{{ app_name }}">
+      <button class="mobile-sidebar-close" type="button" aria-label="Menu sluiten" data-mobile-nav-close>×</button>
     </div>
     <nav>
       {% if session.get('user_role') == 'Medewerker' %}
@@ -33,23 +37,31 @@
       {% endif %}
     </nav>
     <div class="sidebar-user">
-      {% if sidebar_photo_employee_id %}
-        <img class="avatar avatar-img" src="{{ url_for('employee_photo', employee_id=sidebar_photo_employee_id) }}" alt="">
-      {% else %}
-        <div class="avatar">{{ session.get('user_name','?')[:1].upper() }}</div>
-      {% endif %}
-      <div>
-        <strong>{{ session.get('user_name') }}</strong>
-        <small>{{ session.get('user_role') }}</small>
+      <div class="sidebar-user-profile">
+        {% if sidebar_photo_employee_id %}
+          <img class="avatar avatar-img" src="{{ url_for('employee_photo', employee_id=sidebar_photo_employee_id) }}" alt="">
+        {% else %}
+          <div class="avatar">{{ session.get('user_name','?')[:1].upper() }}</div>
+        {% endif %}
+        <div class="sidebar-user-copy">
+          <strong>{{ session.get('user_name') }}</strong>
+          <small>{{ session.get('user_role') }}</small>
+        </div>
       </div>
-      <a href="{{ url_for('account_password') }}" title="Wachtwoord wijzigen">🔑</a>
-      <a href="{{ url_for('logout') }}" title="Afmelden">↪</a>
+      <div class="sidebar-user-actions">
+        <a href="{{ url_for('account_password') }}" title="Wachtwoord wijzigen"><span aria-hidden="true">🔑</span><span class="sidebar-action-label">Wachtwoord</span></a>
+        <a href="{{ url_for('logout') }}" title="Afmelden"><span aria-hidden="true">↪</span><span class="sidebar-action-label">Uitloggen</span></a>
+      </div>
     </div>
   </aside>
+  <button class="mobile-nav-backdrop" type="button" aria-label="Menu sluiten" data-mobile-nav-close></button>
 
   <main class="main">
     <header class="topbar">
-      <div>
+      <button class="mobile-menu-button" type="button" aria-label="Menu openen" aria-controls="app-sidebar" aria-expanded="false" data-mobile-nav-open>
+        <span aria-hidden="true">☰</span><span>Menu</span>
+      </button>
+      <div class="topbar-copy">
         <h1>{% block page_title %}{{ app_name }}{% endblock %}</h1>
         <p>{% block page_subtitle %}{% endblock %}</p>
       </div>
@@ -75,5 +87,42 @@
 {% else %}
   {% block auth_content %}{% endblock %}
 {% endif %}
+<script>
+(function () {
+  const body = document.body;
+  const openButton = document.querySelector('[data-mobile-nav-open]');
+  const closeButtons = document.querySelectorAll('[data-mobile-nav-close]');
+  const sidebar = document.getElementById('app-sidebar');
+
+  function setMenu(open) {
+    body.classList.toggle('mobile-nav-open', open);
+    if (openButton) openButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (sidebar) sidebar.setAttribute('aria-hidden', open ? 'false' : (window.innerWidth <= 760 ? 'true' : 'false'));
+  }
+
+  if (openButton) openButton.addEventListener('click', function () { setMenu(true); });
+  closeButtons.forEach(function (button) {
+    button.addEventListener('click', function () { setMenu(false); });
+  });
+
+  if (sidebar) {
+    sidebar.querySelectorAll('a').forEach(function (link) {
+      link.addEventListener('click', function () {
+        if (window.innerWidth <= 760) setMenu(false);
+      });
+    });
+  }
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') setMenu(false);
+  });
+
+  window.addEventListener('resize', function () {
+    if (window.innerWidth > 760) setMenu(false);
+  });
+
+  if (window.innerWidth <= 760 && sidebar) sidebar.setAttribute('aria-hidden', 'true');
+})();
+</script>
 </body>
 </html>

@@ -7,7 +7,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 BASE_DIR = Path(__file__).resolve().parent
-EXPECTED_VERSION = "1.3.4"
+EXPECTED_VERSION = "1.3.5"
 
 errors = []
 warnings = []
@@ -141,8 +141,8 @@ if "def _invite_email_content(" not in source:
     errors.append("1.3.2: uitnodigingsmail gebruikt de nieuwe mailbasis niet.")
 
 # 1.3.3 Branding & polish checks.
-if 'COPYRIGHT_OWNER = "Praktijk Schitter"' not in source:
-    errors.append("1.3.3: officiële copyrightnaam ontbreekt.")
+if 'COPYRIGHT_OWNER = "AM | Software as a Hobby"' not in source:
+    errors.append("1.3.5: developer-copyrightnaam ontbreekt.")
 if "preheader:" not in source or "mso-hide:all" not in source:
     errors.append("1.3.3: e-mailpreheader ontbreekt.")
 if "background:linear-gradient" in source:
@@ -159,6 +159,21 @@ if ".statusbar::after" not in style_source or "linear-gradient(90deg,var(--pink)
     errors.append("1.3.4: dunne vierkleurige huisstijllijn ontbreekt onder de applicatiefooter.")
 if ".statusbar{position:fixed" not in style_source or "background:#fff" not in style_source:
     errors.append("1.3.4: rustige lichte applicatiefooter ontbreekt.")
+
+# 1.3.5 Mobile & identity checks.
+base_template = (BASE_DIR / "templates" / "base.html").read_text(encoding="utf-8")
+style_source = (BASE_DIR / "static" / "style.css").read_text(encoding="utf-8")
+for required in ("favicon.ico", "favicon.png"):
+    if not (BASE_DIR / "static" / required).exists():
+        errors.append(f"1.3.5: {required} ontbreekt.")
+if 'data-mobile-nav-open' not in base_template or 'data-mobile-nav-close' not in base_template:
+    errors.append("1.3.5: mobiele navigatiebediening ontbreekt.")
+if "Uitloggen" not in base_template:
+    errors.append("1.3.5: mobiele uitlogtekst ontbreekt.")
+if "body.mobile-nav-open .sidebar" not in style_source:
+    errors.append("1.3.5: mobiele off-canvas sidebar CSS ontbreekt.")
+if "overflow-x:auto" not in style_source:
+    errors.append("1.3.5: mobiele tabel-scroll ontbreekt.")
 
 print("Praktijk Schitter Beheer – SELFTEST")
 print("=" * 42)
