@@ -7,7 +7,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 BASE_DIR = Path(__file__).resolve().parent
-EXPECTED_VERSION = "1.3.5"
+EXPECTED_VERSION = "1.3.6"
 
 errors = []
 warnings = []
@@ -174,6 +174,23 @@ if "body.mobile-nav-open .sidebar" not in style_source:
     errors.append("1.3.5: mobiele off-canvas sidebar CSS ontbreekt.")
 if "overflow-x:auto" not in style_source:
     errors.append("1.3.5: mobiele tabel-scroll ontbreekt.")
+
+# 1.3.6 controlled Excel migration checks.
+if "def _parse_employee_excel(" not in source:
+    errors.append("1.3.6: gecontroleerde Excel-parser ontbreekt.")
+if "EXCEL_IMPORT_EXPECTED_ROWS" not in source:
+    errors.append("1.3.6: Excel-structuurcontrole ontbreekt.")
+if "def _create_excel_import_backup(" not in source or "__manifest__.json" not in source:
+    errors.append("1.3.6: herstelpunt/rollback voor Excel-import ontbreekt.")
+if "Conflict bij account/code" not in source:
+    errors.append("1.3.6: conflictstop voor bestaande geheime waarden ontbreekt.")
+if "settings_import_excel_confirm" not in source:
+    errors.append("1.3.6: bevestigde Excel-import route ontbreekt.")
+if "openpyxl" not in (BASE_DIR / "requirements.txt").read_text(encoding="utf-8").lower():
+    errors.append("1.3.6: openpyxl dependency ontbreekt.")
+for template_name in ("import_excel.html", "import_excel_result.html"):
+    if not (BASE_DIR / "templates" / template_name).exists():
+        errors.append(f"1.3.6: {template_name} ontbreekt.")
 
 print("Praktijk Schitter Beheer – SELFTEST")
 print("=" * 42)

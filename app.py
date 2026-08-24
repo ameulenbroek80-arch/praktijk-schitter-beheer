@@ -44,6 +44,7 @@ SESSION_KEY_FILE = STORAGE_DIR / ".session.key"
 DATA_FILE = STORAGE_DIR / "employees.enc"
 SETTINGS_FILE = STORAGE_DIR / "settings.enc"
 MODULES_FILE = STORAGE_DIR / "modules.enc"
+IMPORT_STAGE_PREFIX = "excel_import_stage_"
 
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -83,7 +84,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "1.3.5"
+APP_VERSION = "1.3.6"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -1177,6 +1178,656 @@ def asset_employee_name(asset, employees_map):
 
 
 
+
+# ---------- Eenmalige gecontroleerde Excel-migratie ----------
+
+EXCEL_IMPORT_EXPECTED_ROWS = {
+    2: "Werkdagen",
+    3: "Werkruimte",
+    4: "VOG",
+    5: "SKJ",
+    6: "NVO",
+    7: "Telefoon:",
+    8: "Telefoonnummer",
+    9: "Toegangscode telefoon",
+    10: "SIM",
+    11: "Laptops:",
+    12: "Toegangscode laptop",
+    13: "Mailadres",
+    14: "Wachtwoord mail",
+    15: "Praktijkdata - inlog",
+    16: "Praktijkdata - ww",
+    17: "HiDrive - inlog",
+    18: "HIDrive - ww",
+    19: "Apple account ww",
+    21: "Boom testcentrum",
+    22: "inlog",
+    23: "ww",
+    25: "Testweb",
+    26: "inlog",
+    27: "ww",
+    29: "Hogrefe",
+    30: "inlog",
+    31: "ww",
+    34: "Zorgmail hosted mail key Mieke",
+    35: "Zorgmail hosted mail key algemeen",
+}
+
+
+def _excel_cell_text(cell) -> str:
+    value = cell.value
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    # Codes moeten tekst blijven. Als Excel een nul-masker gebruikt, behoud dat.
+    fmt = str(getattr(cell, "number_format", "") or "")
+    if isinstance(value, (int, float)) and fmt and set(fmt.replace("-", "").replace(" ", "")) <= {"0"}:
+        width = fmt.count("0")
+        try:
+            return str(int(value)).zfill(width)
+        except (ValueError, TypeError):
+            pass
+    return str(value).strip()
+
+
+def _new_import_stage_path(token: str) -> Path:
+    safe = re.sub(r"[^a-f0-9]", "", token.lower())
+    return STORAGE_DIR / f"{IMPORT_STAGE_PREFIX}{safe}.enc"
+
+
+def _delete_import_stage(token: str) -> None:
+    try:
+        _new_import_stage_path(token).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _parse_employee_excel(raw: bytes, filename: str) -> dict:
+    if not filename.lower().endswith(".xlsx"):
+        raise ValueError("Alleen het originele .xlsx-bestand wordt geaccepteerd.")
+
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise ValueError(
+            "De Excel-importmodule is nog niet geïnstalleerd. Deploy deze versie opnieuw zodat requirements.txt wordt verwerkt."
+        ) from exc
+
+    try:
+        workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    except Exception as exc:
+        raise ValueError(f"Excelbestand kon niet veilig worden gelezen: {exc}") from exc
+
+    if not workbook.sheetnames:
+        raise ValueError("Excelbestand bevat geen werkblad.")
+    ws = workbook[workbook.sheetnames[0]]
+
+    # Fail closed: dit importsjabloon is bewust alleen voor het bekende Praktijk Schitter-overzicht.
+    structure_errors = []
+    for row_number, expected in EXCEL_IMPORT_EXPECTED_ROWS.items():
+        actual = _excel_cell_text(ws.cell(row_number, 1))
+        if actual != expected:
+            structure_errors.append(f"Rij {row_number}: verwacht '{expected}', gevonden '{actual or 'leeg'}'.")
+    if structure_errors:
+        raise ValueError(
+            "De indeling wijkt af van het gecontroleerde importformaat. Er is niets geïmporteerd. "
+            + " ".join(structure_errors[:4])
+        )
+
+    source_people = []
+    for col in range(2, 6):
+        name = _excel_cell_text(ws.cell(1, col))
+        if not name:
+            raise ValueError(f"Medewerkersnaam ontbreekt in kolom {col}.")
+        source_people.append({
+            "source_key": name.casefold(),
+            "name": name,
+            "workdays": _excel_cell_text(ws.cell(2, col)),
+            "work_location": _excel_cell_text(ws.cell(3, col)),
+            "vog": _excel_cell_text(ws.cell(4, col)),
+            "skj": _excel_cell_text(ws.cell(5, col)),
+            "nvo": _excel_cell_text(ws.cell(6, col)),
+            "phone_model": _excel_cell_text(ws.cell(7, col)),
+            "phone_number": _excel_cell_text(ws.cell(8, col)),
+            "phone_access_code": _excel_cell_text(ws.cell(9, col)),
+            "sim_pin": _excel_cell_text(ws.cell(10, col)),
+            "laptop": _excel_cell_text(ws.cell(11, col)),
+            "laptop_access_code": _excel_cell_text(ws.cell(12, col)),
+            "work_email": _excel_cell_text(ws.cell(13, col)),
+            "mail_password": _excel_cell_text(ws.cell(14, col)),
+            "praktijkdata_login": _excel_cell_text(ws.cell(15, col)),
+            "praktijkdata_password": _excel_cell_text(ws.cell(16, col)),
+            "hidrive_login": _excel_cell_text(ws.cell(17, col)),
+            "hidrive_password": _excel_cell_text(ws.cell(18, col)),
+            "apple_password": _excel_cell_text(ws.cell(19, col)),
+            "boom_url": _excel_cell_text(ws.cell(21, col)),
+            "boom_login": _excel_cell_text(ws.cell(22, col)),
+            "boom_password": _excel_cell_text(ws.cell(23, col)),
+            "testweb_url": _excel_cell_text(ws.cell(25, col)),
+            "testweb_login": _excel_cell_text(ws.cell(26, col)),
+            "testweb_password": _excel_cell_text(ws.cell(27, col)),
+            "hogrefe_url": _excel_cell_text(ws.cell(29, col)),
+            "hogrefe_login": _excel_cell_text(ws.cell(30, col)),
+            "hogrefe_password": _excel_cell_text(ws.cell(31, col)),
+        })
+
+    # Four work e-mail addresses are our stable employee identifiers.
+    emails = [p["work_email"].lower() for p in source_people]
+    if any(not email or not EMAIL_RE.match(email) for email in emails):
+        raise ValueError("Niet alle zakelijke e-mailadressen zijn geldig; import is afgebroken.")
+    if len(set(emails)) != len(emails):
+        raise ValueError("Zakelijke e-mailadressen zijn niet uniek; import is afgebroken.")
+
+    # Shared accounts are only collapsed when URL/login/secret are identical for all four people.
+    def shared_triplet(prefix: str):
+        values = [
+            (
+                p.get(f"{prefix}_url", ""),
+                p.get(f"{prefix}_login", ""),
+                p.get(f"{prefix}_password", ""),
+            )
+            for p in source_people
+        ]
+        return values[0] if len(set(values)) == 1 and all(values[0]) else None
+
+    testweb_shared = shared_triplet("testweb")
+    hogrefe_shared = shared_triplet("hogrefe")
+
+    warnings = []
+    # Do not "correct" source data. Flag noteworthy repeated secrets without exposing them.
+    hidrive_secrets = [p["hidrive_password"] for p in source_people if p["hidrive_password"]]
+    if len(hidrive_secrets) != len(set(hidrive_secrets)):
+        warnings.append("HiDrive bevat een identiek wachtwoord bij meer dan één medewerker; de bronwaarde wordt exact overgenomen.")
+    phone_codes = [p["phone_access_code"] for p in source_people if p["phone_access_code"]]
+    if len(phone_codes) > 1 and len(set(phone_codes)) == 1:
+        warnings.append("De telefoontoegangscode is voor alle ingevulde medewerkers gelijk; de bronwaarde wordt exact overgenomen.")
+
+    practice_credentials = []
+    def _single_practice_value(row_number: int, label: str) -> str:
+        values = [_excel_cell_text(ws.cell(row_number, col)) for col in range(2, 6)]
+        nonempty = [v for v in values if v]
+        if len(nonempty) > 1:
+            raise ValueError(f"'{label}' bevat meerdere ingevulde waarden; import is afgebroken.")
+        return nonempty[0] if nonempty else ""
+
+    zorgmail_mieke = _single_practice_value(34, "Zorgmail hosted mail key Mieke")
+    zorgmail_algemeen = _single_practice_value(35, "Zorgmail hosted mail key algemeen")
+    if zorgmail_mieke:
+        practice_credentials.append({
+            "service": "Zorgmail hosted mail key Mieke",
+            "scope": "Praktijkbreed",
+            "username": "",
+            "secret_type": "Mail key",
+            "secret": zorgmail_mieke,
+            "url": "",
+            "category": "Zorgmail",
+            "notes": "Geïmporteerd uit gecontroleerd Excel-overzicht; bron stond los van medewerkerstoewijzing.",
+        })
+    if zorgmail_algemeen:
+        practice_credentials.append({
+            "service": "Zorgmail hosted mail key algemeen",
+            "scope": "Praktijkbreed",
+            "username": "",
+            "secret_type": "Mail key",
+            "secret": zorgmail_algemeen,
+            "url": "",
+            "category": "Zorgmail",
+            "notes": "Geïmporteerd uit gecontroleerd Excel-overzicht.",
+        })
+
+    plan = {
+        "source_filename": filename,
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
+        "people": source_people,
+        "shared": {
+            "testweb": testweb_shared,
+            "hogrefe": hogrefe_shared,
+        },
+        "practice_credentials": practice_credentials,
+        "warnings": warnings,
+        "parsed_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    return plan
+
+
+def _ensure_workdays_custom_field(settings: dict) -> tuple[dict, str]:
+    definitions = settings.setdefault("custom_field_definitions", [])
+    existing = next(
+        (d for d in definitions if str(d.get("label", "")).strip().casefold() == "werkdagen"),
+        None,
+    )
+    if existing:
+        return settings, existing["id"]
+    field_id = "workdays"
+    if any(d.get("id") == field_id for d in definitions):
+        field_id = f"workdays_{uuid.uuid4().hex[:8]}"
+    definitions.append({
+        "id": field_id,
+        "label": "Werkdagen",
+        "section": "Praktisch",
+        "type": "text",
+    })
+    return settings, field_id
+
+
+def _credential_identity(record: dict) -> tuple:
+    return (
+        str(record.get("service", "")).strip().casefold(),
+        str(record.get("scope", "")).strip(),
+        str(record.get("username", "")).strip().casefold(),
+        str(record.get("secret_type", "")).strip(),
+        tuple(sorted(record.get("linked_employee_ids", []))),
+    )
+
+
+def _asset_identity(asset: dict) -> tuple:
+    return (
+        str(asset.get("category", "")).strip().casefold(),
+        str(asset.get("name", "")).strip().casefold(),
+        str(asset.get("model", "")).strip().casefold(),
+        str(asset.get("phone_number", "")).replace(" ", "").replace("-", ""),
+        str(asset.get("assigned_employee_id", "")),
+    )
+
+
+def _excel_import_target_files() -> list[Path]:
+    return [
+        DATA_FILE,
+        SETTINGS_FILE,
+        STORAGE_DIR / "assets.enc",
+        STORAGE_DIR / "credentials.enc",
+        STORAGE_DIR / "registrations.enc",
+    ]
+
+
+def _create_excel_import_backup() -> Path:
+    backup_dir = STORAGE_DIR / "import_backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = backup_dir / f"before_excel_import_{stamp}.zip"
+    candidates = _excel_import_target_files()
+    present = [file_path.name for file_path in candidates if file_path.exists()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("__manifest__.json", json.dumps({"present": present}, ensure_ascii=False))
+        for file_path in candidates:
+            if file_path.exists():
+                zf.write(file_path, arcname=file_path.name)
+    return path
+
+
+def _restore_excel_import_backup(path: Path) -> None:
+    candidates = _excel_import_target_files()
+    with zipfile.ZipFile(path, "r") as zf:
+        try:
+            manifest = json.loads(zf.read("__manifest__.json").decode("utf-8"))
+            present = set(manifest.get("present", []))
+        except Exception:
+            present = {name for name in zf.namelist() if not name.startswith("__")}
+
+        # Delete files that were created by the failed import but did not exist before it.
+        for destination in candidates:
+            if destination.name not in present:
+                try:
+                    destination.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+        for name in present:
+            if "/" in name or "\\" in name or name not in zf.namelist():
+                continue
+            destination = STORAGE_DIR / name
+            temp = destination.with_suffix(destination.suffix + ".rollback")
+            temp.write_bytes(zf.read(name))
+            temp.replace(destination)
+
+
+def _apply_employee_excel_plan(plan: dict) -> dict:
+    """Apply all workbook data as one guarded migration.
+
+    Existing records are matched by business e-mail. We never silently overwrite
+    a conflicting existing credential or asset. Any conflict aborts the entire
+    migration before writes begin.
+    """
+    now = datetime.now().isoformat(timespec="seconds")
+    today = date.today().isoformat()
+
+    employees = [normalize_employee(dict(e)) for e in load_employees()]
+
+    # Read raw central modules without triggering legacy migrations/writes during preflight.
+    assets = [dict(a) for a in load_module("assets")]
+    for asset in assets:
+        asset.setdefault("status", "Vrij")
+        asset.setdefault("assigned_employee_id", "")
+        asset.setdefault("assignment_history", [])
+        asset.setdefault("category", "Overig")
+        asset.setdefault("name", "Bedrijfsmiddel")
+        asset.setdefault("model", "")
+        asset.setdefault("phone_number", "")
+
+    credentials = [dict(c) for c in load_module("credentials")]
+    for record in credentials:
+        record.setdefault("scope", "Persoonlijk")
+        record.setdefault("employee_id", "")
+        record.setdefault("linked_employee_ids", [])
+        if record.get("employee_id") and record["employee_id"] not in record["linked_employee_ids"]:
+            record["linked_employee_ids"].append(record["employee_id"])
+        record.setdefault("username", "")
+        record.setdefault("secret_type", "Wachtwoord")
+        record.setdefault("secret", "")
+
+    registrations = [dict(r) for r in load_module("registrations")]
+    settings = load_settings()
+    settings, workdays_field_id = _ensure_workdays_custom_field(settings)
+
+    email_to_employee = {
+        str(e.get("work_email", "")).strip().lower(): e
+        for e in employees
+        if str(e.get("work_email", "")).strip()
+    }
+
+    source_to_employee = {}
+    new_employee_count = 0
+    updated_employee_count = 0
+
+    # Build employee objects in memory first.
+    for person in plan["people"]:
+        email = person["work_email"].strip().lower()
+        employee = email_to_employee.get(email)
+        if employee is None:
+            same_name_without_email = [
+                e for e in employees
+                if str(e.get("first_name", "")).strip().casefold() == person["name"].strip().casefold()
+                and not str(e.get("work_email", "")).strip()
+            ]
+            if same_name_without_email:
+                raise ValueError(
+                    f"Er bestaat al een medewerker met voornaam '{person['name']}' zonder zakelijk e-mailadres. "
+                    "Om een verkeerde koppeling te voorkomen is de import volledig gestopt."
+                )
+            # Only the first name exists in the source. Do not invent a surname.
+            employee = normalize_employee({
+                "id": str(uuid.uuid4()),
+                "first_name": person["name"],
+                "last_name": "",
+                "status": "In dienst",
+                "created_at": now,
+            })
+            employees.append(employee)
+            email_to_employee[email] = employee
+            new_employee_count += 1
+        else:
+            updated_employee_count += 1
+
+        employee["first_name"] = employee.get("first_name") or person["name"]
+        employee["work_email"] = person["work_email"]
+        employee["work_location"] = person["work_location"]
+        employee.setdefault("custom_fields", {})
+        employee["custom_fields"][workdays_field_id] = person["workdays"]
+        employee["updated_at"] = now
+        source_to_employee[person["source_key"]] = employee
+
+    # Prepare proposed records.
+    proposed_assets = []
+    proposed_credentials = []
+    proposed_registrations = []
+
+    for person in plan["people"]:
+        employee = source_to_employee[person["source_key"]]
+        employee_id = employee["id"]
+        employee_name = f"{employee.get('first_name','')} {employee.get('last_name','')}".strip()
+
+        if person["phone_model"]:
+            proposed_assets.append({
+                "id": str(uuid.uuid4()),
+                "category": "Telefoon",
+                "name": person["phone_model"],
+                "brand": "Apple" if "iphone" in person["phone_model"].casefold() else "",
+                "model": person["phone_model"],
+                "serial_number": "",
+                "asset_number": "",
+                "imei": "",
+                "phone_number": person["phone_number"],
+                "provider": "",
+                "pin": person["sim_pin"],
+                "puk": "",
+                "os": "iOS" if "iphone" in person["phone_model"].casefold() else "",
+                "purchase_date": "",
+                "warranty_until": "",
+                "return_due": "",
+                "accessories": "",
+                "notes": "SIM-code uit bronbestand opgeslagen als PIN. PUK was niet opgenomen in de bron.",
+                "status": "Uitgegeven",
+                "assigned_employee_id": employee_id,
+                "assignment_history": [{
+                    "employee_id": employee_id,
+                    "employee_name": employee_name,
+                    "assigned_at": today,
+                    "returned_at": "",
+                    "note": "Geïmporteerd uit gecontroleerd Excel-overzicht",
+                }],
+                "created_at": now,
+                "updated_at": now,
+            })
+        if person["phone_access_code"]:
+            proposed_credentials.append({
+                "service": "Telefoon toegangscode",
+                "scope": "Persoonlijk",
+                "linked_employee_ids": [employee_id],
+                "username": "",
+                "secret_type": "Toegangscode",
+                "secret": person["phone_access_code"],
+                "url": "",
+                "category": "Apparaattoegang",
+                "status": "Actief",
+                "notes": f"Toegangscode voor {person['phone_model'] or 'telefoon'}.",
+            })
+
+        if person["laptop"]:
+            proposed_assets.append({
+                "id": str(uuid.uuid4()),
+                "category": "Laptop",
+                "name": person["laptop"],
+                "brand": "Apple" if "macbook" in person["laptop"].casefold() else "",
+                "model": person["laptop"],
+                "serial_number": "",
+                "asset_number": "",
+                "imei": "",
+                "phone_number": "",
+                "provider": "",
+                "pin": "",
+                "puk": "",
+                "os": "macOS" if "macbook" in person["laptop"].casefold() else "",
+                "purchase_date": "",
+                "warranty_until": "",
+                "return_due": "",
+                "accessories": "",
+                "notes": "",
+                "status": "Uitgegeven",
+                "assigned_employee_id": employee_id,
+                "assignment_history": [{
+                    "employee_id": employee_id,
+                    "employee_name": employee_name,
+                    "assigned_at": today,
+                    "returned_at": "",
+                    "note": "Geïmporteerd uit gecontroleerd Excel-overzicht",
+                }],
+                "created_at": now,
+                "updated_at": now,
+            })
+        if person["laptop_access_code"]:
+            proposed_credentials.append({
+                "service": "Laptop toegangscode",
+                "scope": "Persoonlijk",
+                "linked_employee_ids": [employee_id],
+                "username": "",
+                "secret_type": "Toegangscode",
+                "secret": person["laptop_access_code"],
+                "url": "",
+                "category": "Apparaattoegang",
+                "status": "Actief",
+                "notes": f"Toegangscode voor {person['laptop'] or 'laptop'}.",
+            })
+
+        personal_accounts = [
+            ("Praktijk Schitter e-mail", person["work_email"], person["mail_password"], "", "E-mail"),
+            ("Praktijkdata", person["praktijkdata_login"], person["praktijkdata_password"], "", "Praktijksoftware"),
+            ("STRATO HiDrive", person["hidrive_login"], person["hidrive_password"], "", "Opslag"),
+            ("Boom Testcentrum", person["boom_login"], person["boom_password"], person["boom_url"], "Testplatform"),
+        ]
+        if person["apple_password"]:
+            personal_accounts.append(("Apple account", "", person["apple_password"], "", "Apple"))
+
+        for service, username, secret, url, category in personal_accounts:
+            if not secret and not username:
+                continue
+            proposed_credentials.append({
+                "service": service,
+                "scope": "Persoonlijk",
+                "linked_employee_ids": [employee_id],
+                "username": username,
+                "secret_type": "Wachtwoord",
+                "secret": secret,
+                "url": url,
+                "category": category,
+                "status": "Actief",
+                "notes": "Geïmporteerd uit gecontroleerd Excel-overzicht.",
+            })
+
+        if person["vog"]:
+            proposed_registrations.append({
+                "id": str(uuid.uuid4()),
+                "employee_id": employee_id,
+                "type": "VOG",
+                "number": "",
+                "institution": "",
+                "obtained_at": "",
+                "expires_at": "",
+                "warning_days": "",
+                "status": "Actief",
+                "notes": person["vog"],
+                "created_at": now,
+                "updated_at": now,
+            })
+        if person["skj"]:
+            proposed_registrations.append({
+                "id": str(uuid.uuid4()), "employee_id": employee_id, "type": "SKJ",
+                "number": person["skj"], "institution": "", "obtained_at": "", "expires_at": "",
+                "warning_days": "", "status": "Actief", "notes": "Geïmporteerd uit Excel.",
+                "created_at": now, "updated_at": now,
+            })
+        if person["nvo"]:
+            proposed_registrations.append({
+                "id": str(uuid.uuid4()), "employee_id": employee_id, "type": "NVO",
+                "number": person["nvo"], "institution": "", "obtained_at": "", "expires_at": "",
+                "warning_days": "", "status": "Actief", "notes": "Geïmporteerd uit Excel.",
+                "created_at": now, "updated_at": now,
+            })
+
+    all_employee_ids = [source_to_employee[p["source_key"]]["id"] for p in plan["people"]]
+    for key, label, category in [
+        ("testweb", "Testweb", "Testplatform"),
+        ("hogrefe", "Hogrefe", "Testplatform"),
+    ]:
+        shared = plan.get("shared", {}).get(key)
+        if shared:
+            url, username, secret = shared
+            proposed_credentials.append({
+                "service": label,
+                "scope": "Gedeeld",
+                "linked_employee_ids": all_employee_ids,
+                "username": username,
+                "secret_type": "Wachtwoord",
+                "secret": secret,
+                "url": url,
+                "category": category,
+                "status": "Actief",
+                "notes": "Gedeeld account: identieke URL, gebruikersnaam en wachtwoord voor alle vier bronmedewerkers.",
+            })
+
+    for source_record in plan.get("practice_credentials", []):
+        record = dict(source_record)
+        record["linked_employee_ids"] = []
+        record["status"] = "Actief"
+        proposed_credentials.append(record)
+
+    # Preflight: no silent conflicts.
+    existing_asset_ids = {_asset_identity(a): a for a in assets}
+    assets_to_add = []
+    skipped_assets = 0
+    for proposed in proposed_assets:
+        identity = _asset_identity(proposed)
+        if identity in existing_asset_ids:
+            skipped_assets += 1
+        else:
+            assets_to_add.append(proposed)
+            existing_asset_ids[identity] = proposed
+
+    existing_cred_ids = {_credential_identity(c): c for c in credentials}
+    credentials_to_add = []
+    skipped_credentials = 0
+    for proposed in proposed_credentials:
+        proposed.setdefault("id", str(uuid.uuid4()))
+        proposed.setdefault("employee_id", proposed["linked_employee_ids"][0] if proposed.get("scope") == "Persoonlijk" else "")
+        proposed.setdefault("last_verified_at", "")
+        proposed.setdefault("created_at", now)
+        proposed.setdefault("updated_at", now)
+        identity = _credential_identity(proposed)
+        existing = existing_cred_ids.get(identity)
+        if existing:
+            # Same identity + same secret means already imported. Different secret is unsafe ambiguity.
+            if str(existing.get("secret", "")) != str(proposed.get("secret", "")):
+                raise ValueError(
+                    f"Conflict bij account/code '{proposed.get('service','')}'. "
+                    "Er bestaat al een gelijk account met een andere geheime waarde. Er is niets gewijzigd."
+                )
+            skipped_credentials += 1
+        else:
+            credentials_to_add.append(proposed)
+            existing_cred_ids[identity] = proposed
+
+    existing_reg_keys = {
+        (r.get("employee_id"), str(r.get("type", "")).strip().casefold())
+        for r in registrations
+    }
+    registrations_to_add = []
+    skipped_regs = 0
+    for reg in proposed_registrations:
+        key = (reg["employee_id"], reg["type"].casefold())
+        if key in existing_reg_keys:
+            skipped_regs += 1
+        else:
+            registrations_to_add.append(reg)
+            existing_reg_keys.add(key)
+
+    # All validation finished. Only now create a recovery point and write.
+    backup_path = _create_excel_import_backup()
+    try:
+        save_settings(settings)
+        save_employees(employees)
+        save_assets(assets + assets_to_add)
+        save_credentials(credentials + credentials_to_add)
+        save_registrations(registrations + registrations_to_add)
+    except Exception:
+        _restore_excel_import_backup(backup_path)
+        raise
+
+    return {
+        "new_employees": new_employee_count,
+        "updated_employees": updated_employee_count,
+        "assets_added": len(assets_to_add),
+        "assets_skipped": skipped_assets,
+        "credentials_added": len(credentials_to_add),
+        "credentials_skipped": skipped_credentials,
+        "registrations_added": len(registrations_to_add),
+        "registrations_skipped": skipped_regs,
+        "backup_file": backup_path.name,
+        "warnings": plan.get("warnings", []),
+    }
+
+
+
+
 @app.route("/assets")
 @admin_required
 @module_required("assets")
@@ -2086,6 +2737,106 @@ def offboarding_reset(employee_id):
     log_action("offboarding_removed", target=employee_id)
     flash("Uitdienstworkflow verwijderd.", "success")
     return redirect(url_for("employee_detail", employee_id=employee_id))
+
+
+
+@app.route("/settings/import-excel", methods=["GET"])
+@admin_required
+def settings_import_excel():
+    return render_template("import_excel.html", preview=None)
+
+
+@app.route("/settings/import-excel/preview", methods=["POST"])
+@admin_required
+@synchronized
+def settings_import_excel_preview():
+    uploaded = request.files.get("excel_file")
+    if not uploaded or not uploaded.filename:
+        flash("Kies eerst het Excelbestand.", "error")
+        return redirect(url_for("settings_import_excel"))
+
+    raw = uploaded.read()
+    if not raw:
+        flash("Het gekozen bestand is leeg.", "error")
+        return redirect(url_for("settings_import_excel"))
+
+    try:
+        plan = _parse_employee_excel(raw, uploaded.filename)
+    except ValueError as exc:
+        log_action("excel_import_rejected", detail=str(exc)[:300])
+        flash(str(exc), "error")
+        return redirect(url_for("settings_import_excel"))
+
+    token = uuid.uuid4().hex
+    _save_encrypted(_new_import_stage_path(token), plan)
+
+    people = plan["people"]
+    asset_count = sum(1 for p in people if p.get("phone_model")) + sum(1 for p in people if p.get("laptop"))
+
+    # Personal credentials: phone/laptop codes + mail/Praktijkdata/HiDrive/Boom + optional Apple.
+    credential_count = 0
+    for p in people:
+        credential_count += int(bool(p.get("phone_access_code")))
+        credential_count += int(bool(p.get("laptop_access_code")))
+        credential_count += sum([
+            int(bool(p.get("work_email") or p.get("mail_password"))),
+            int(bool(p.get("praktijkdata_login") or p.get("praktijkdata_password"))),
+            int(bool(p.get("hidrive_login") or p.get("hidrive_password"))),
+            int(bool(p.get("boom_login") or p.get("boom_password"))),
+            int(bool(p.get("apple_password"))),
+        ])
+    credential_count += int(bool(plan.get("shared", {}).get("testweb")))
+    credential_count += int(bool(plan.get("shared", {}).get("hogrefe")))
+    credential_count += len(plan.get("practice_credentials", []))
+
+    registration_count = sum(
+        int(bool(p.get("vog"))) + int(bool(p.get("skj"))) + int(bool(p.get("nvo")))
+        for p in people
+    )
+    summary = {
+        "employees": len(people),
+        "assets": asset_count,
+        "credentials": credential_count,
+        "registrations": registration_count,
+        "source_filename": plan.get("source_filename", ""),
+        "source_sha256_short": plan.get("source_sha256", "")[:12],
+        "warnings": plan.get("warnings", []),
+    }
+    log_action("excel_import_previewed", detail=f"{len(people)} medewerkers")
+    return render_template("import_excel.html", preview=summary, import_token=token)
+
+
+@app.route("/settings/import-excel/confirm", methods=["POST"])
+@admin_required
+@synchronized
+def settings_import_excel_confirm():
+    token = request.form.get("import_token", "").strip()
+    stage_path = _new_import_stage_path(token)
+    if not token or not stage_path.exists():
+        flash("De importvoorbereiding is verlopen. Kies het Excelbestand opnieuw.", "error")
+        return redirect(url_for("settings_import_excel"))
+
+    try:
+        plan = _load_encrypted(stage_path, {})
+        if not isinstance(plan, dict) or not plan.get("people"):
+            raise ValueError("De voorbereide import is ongeldig.")
+        result = _apply_employee_excel_plan(plan)
+    except Exception as exc:
+        log_action("excel_import_failed", detail=str(exc)[:300])
+        flash(f"Import afgebroken: {exc}", "error")
+        return redirect(url_for("settings_import_excel"))
+    finally:
+        _delete_import_stage(token)
+
+    log_action(
+        "excel_import_completed",
+        detail=(
+            f"{result['new_employees']} nieuw, {result['updated_employees']} bijgewerkt; "
+            f"{result['assets_added']} middelen; {result['credentials_added']} accounts/codes; "
+            f"{result['registrations_added']} registraties"
+        ),
+    )
+    return render_template("import_excel_result.html", result=result)
 
 
 @app.route("/settings", methods=["GET","POST"])

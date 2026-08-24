@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Import voltooid · {{ app_name }}{% endblock %}
+{% block page_title %}Excel-import voltooid{% endblock %}
+{% block page_subtitle %}De gegevens zijn gecontroleerd en verdeeld over de juiste onderdelen.{% endblock %}
+{% block content %}
+<div class="card import-result-card">
+  <div class="card-header"><div><h2>Import geslaagd ✓</h2><p>Er is automatisch een herstelpunt gemaakt vóórdat de bestanden zijn gewijzigd.</p></div></div>
+  <div class="import-summary-grid">
+    <div><strong>{{ result.new_employees }}</strong><span>nieuwe medewerkers</span></div>
+    <div><strong>{{ result.assets_added }}</strong><span>bedrijfsmiddelen toegevoegd</span></div>
+    <div><strong>{{ result.credentials_added }}</strong><span>accounts & codes toegevoegd</span></div>
+    <div><strong>{{ result.registrations_added }}</strong><span>registraties toegevoegd</span></div>
+  </div>
+  {% if result.updated_employees or result.assets_skipped or result.credentials_skipped or result.registrations_skipped %}
+  <div class="module-note">
+    Bestaand en veilig herkend: {{ result.updated_employees }} medewerker(s) bijgewerkt,
+    {{ result.assets_skipped }} middel(en), {{ result.credentials_skipped }} account/code(s) en
+    {{ result.registrations_skipped }} registratie(s) niet dubbel toegevoegd.
+  </div>
+  {% endif %}
+  {% if result.warnings %}
+  <div class="import-warning-box">
+    <strong>Ongewijzigd uit de bron overgenomen</strong>
+    {% for warning in result.warnings %}<p>⚠ {{ warning }}</p>{% endfor %}
+  </div>
+  {% endif %}
+  <div class="module-note">Herstelpunt op server: <strong>{{ result.backup_file }}</strong></div>
+  <div class="import-confirm-actions">
+    <a class="btn secondary" href="{{ url_for('settings_page') }}">Naar Instellingen</a>
+    <a class="btn primary" href="{{ url_for('employees') }}">Bekijk medewerkers</a>
+  </div>
+</div>
+{% endblock %}

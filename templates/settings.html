@@ -128,6 +128,15 @@
   </div>
 
 
+
+  <div class="card">
+    <div class="card-header">
+      <div><h2>Gecontroleerde Excel-import</h2><p>Eenmalige migratie van het bestaande medewerkers-/wachtwoordenoverzicht</p></div>
+      <a class="btn secondary" href="{{ url_for('settings_import_excel') }}">Excel importeren</a>
+    </div>
+    <p class="hint">De importer controleert het bekende Excel-format, maakt eerst een herstelpunt en stopt volledig bij conflicten. Geheime waarden komen niet in GitHub terecht.</p>
+  </div>
+
   <div class="card">
     <div class="card-header"><div><h2>Workflow-sjablonen</h2><p>Bepaal zelf welke stappen standaard in een indienst- of uitdienstworkflow komen</p></div></div>
     <p class="hint">Nieuwe workflows gebruiken de lijst zoals die op dat moment is ingesteld. Bestaande workflows veranderen niet mee.</p>

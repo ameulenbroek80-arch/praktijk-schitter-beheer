@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Excel-import · {{ app_name }}{% endblock %}
+{% block page_title %}Excel-import{% endblock %}
+{% block page_subtitle %}Gecontroleerde eenmalige migratie van het personeels-/wachtwoordenoverzicht{% endblock %}
+{% block content %}
+<div class="detail-grid">
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2>Bronbestand controleren</h2>
+        <p>De import accepteert alleen het bekende Praktijk Schitter Excel-format en wijzigt niets zolang de controle niet slaagt.</p>
+      </div>
+    </div>
+    {% if not preview %}
+    <form class="form-grid import-upload-form" method="post" enctype="multipart/form-data" action="{{ url_for('settings_import_excel_preview') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="full">Excelbestand (.xlsx)
+        <input type="file" name="excel_file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+        <small>Het bestand wordt alleen tijdelijk verwerkt. Wachtwoorden worden niet in GitHub of de broncode opgenomen.</small>
+      </label>
+      <div class="full"><button class="btn primary" type="submit">Bestand controleren</button></div>
+    </form>
+    {% else %}
+    <div class="import-summary-grid">
+      <div><strong>{{ preview.employees }}</strong><span>medewerkers</span></div>
+      <div><strong>{{ preview.assets }}</strong><span>bedrijfsmiddelen</span></div>
+      <div><strong>{{ preview.credentials }}</strong><span>accounts & codes</span></div>
+      <div><strong>{{ preview.registrations }}</strong><span>registraties</span></div>
+    </div>
+    <div class="module-note">
+      <strong>Bestand gecontroleerd:</strong> {{ preview.source_filename }} · controlecode {{ preview.source_sha256_short }}
+    </div>
+    {% if preview.warnings %}
+    <div class="import-warning-box">
+      <strong>Bronwaarschuwingen</strong>
+      {% for warning in preview.warnings %}<p>⚠ {{ warning }}</p>{% endfor %}
+      <small>Dit zijn geen importfouten. De waarden worden exact uit het Excelbestand overgenomen; de app verzint of corrigeert geen wachtwoorden.</small>
+    </div>
+    {% endif %}
+    <form method="post" action="{{ url_for('settings_import_excel_confirm') }}" onsubmit="return confirm('De gecontroleerde gegevens nu definitief importeren? Er wordt automatisch een herstelpunt gemaakt.')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="import_token" value="{{ import_token }}">
+      <div class="import-confirm-actions">
+        <a class="btn secondary" href="{{ url_for('settings_import_excel') }}">Annuleren</a>
+        <button class="btn primary" type="submit">Gecontroleerde import uitvoeren</button>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div><h2>Wat komt waar?</h2><p>De mapping is vastgelegd in de software en wordt niet aan de gebruiker overgelaten.</p></div></div>
+    <div class="import-map">
+      <div><strong>Medewerkers</strong><span>Naam, werkruimte, werkdagen en zakelijk e-mailadres</span></div>
+      <div><strong>Bedrijfsmiddelen</strong><span>Telefoons en laptops, inclusief telefoonnummer en SIM-PIN waar aanwezig</span></div>
+      <div><strong>Accounts & codes</strong><span>E-mail, Praktijkdata, HiDrive, Apple, testplatforms, apparaatcodes en Zorgmail-keys</span></div>
+      <div><strong>Registraties</strong><span>VOG en alleen ingevulde SKJ/NVO-gegevens</span></div>
+    </div>
+    <div class="module-note">
+      <strong>Veiligheidsregels:</strong> bestaande medewerkers worden alleen gekoppeld via exact zakelijk e-mailadres; een bestaand gelijk account met een ander wachtwoord veroorzaakt een volledige stop; vóór schrijven wordt een herstelpunt gemaakt.
+    </div>
+  </div>
+</div>
+{% endblock %}

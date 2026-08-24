@@ -309,3 +309,19 @@ De lokale 1.0 is bedoeld voor gebruik in een afgeschermde omgeving. Voor publica
 - Favicon `Sterren.ico` toegevoegd voor het eigen subdomein.
 - Software-copyright gewijzigd naar **AM | Software as a Hobby**.
 - Praktijk Schitter blijft de praktijk-/productcontext; de software-identiteit staat los daarvan.
+
+
+## 1.3.6 – Gecontroleerde Excel-migratie
+- Admin-only import voor het bestaande Praktijk Schitter medewerkers-/wachtwoordenoverzicht.
+- Herkent uitsluitend de gecontroleerde Excel-layout; afwijkende structuur wordt volledig geweigerd.
+- Medewerkers worden gekoppeld via exact zakelijk e-mailadres.
+- Werkdagen worden als configureerbaar praktisch veld vastgelegd; werkruimte als werklocatie.
+- Telefoons en laptops worden als bedrijfsmiddelen aan de juiste medewerker gekoppeld.
+- Apparaattoegangscodes, e-mail, Praktijkdata, HiDrive, Apple en testplatforms worden als accounts/codes gemigreerd.
+- Identieke Testweb/Hogrefe-accounts worden één gedeeld account in plaats van vier duplicaten.
+- Zorgmail hosted mail keys worden praktijkbreed opgeslagen.
+- VOG en alleen werkelijk ingevulde SKJ/NVO-gegevens worden registraties.
+- Bronwaarden worden niet 'slim' gewijzigd; opvallende herhalingen worden als waarschuwing gemeld.
+- Bij een bestaand gelijk account met een andere geheime waarde stopt de volledige import.
+- Vóór schrijven wordt automatisch een herstelpunt gemaakt; bij een schrijffout wordt teruggerold.
+- Geheime waarden staan nooit in Git of in de releasecode: het originele Excelbestand wordt via HTTPS geüpload.

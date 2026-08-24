@@ -309,3 +309,16 @@ textarea{resize:vertical}.form-actions{display:flex;justify-content:flex-end;gap
   .quick-grid{grid-template-columns:1fr}
   .btn{min-height:44px}
 }
+
+/* v1.3.6 gecontroleerde Excel-migratie */
+.import-upload-form{padding:0 22px 22px}.import-upload-form input[type=file]{padding:12px;background:#f9fbfb;border:1px dashed #cbdada;border-radius:12px}
+.import-summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:0 22px 20px}
+.import-summary-grid>div{padding:18px;border:1px solid var(--line);border-radius:14px;background:#fbfdfd;text-align:center}
+.import-summary-grid strong{display:block;font-size:28px;color:var(--teal)}.import-summary-grid span{font-size:12px;color:var(--muted)}
+.import-map{padding:0 22px 18px}.import-map>div{padding:13px 0;border-top:1px solid var(--line)}.import-map strong,.import-map span{display:block}.import-map span{margin-top:4px;color:var(--muted);font-size:13px}
+.import-warning-box{margin:0 22px 20px;padding:16px 18px;border-radius:13px;background:rgba(157,118,41,.10);border:1px solid rgba(157,118,41,.25);color:#6c5727}
+.import-warning-box p{margin:8px 0 0}.import-warning-box small{display:block;margin-top:10px;color:#776a4a}
+.import-confirm-actions{display:flex;gap:10px;justify-content:flex-end;padding:0 22px 22px;flex-wrap:wrap}
+.import-result-card{max-width:980px}
+@media(max-width:760px){.import-summary-grid{grid-template-columns:1fr 1fr;padding:0 16px 16px}.import-confirm-actions{padding:0 16px 18px}.import-warning-box{margin:0 16px 18px}}
+@media(max-width:430px){.import-summary-grid{grid-template-columns:1fr}}
