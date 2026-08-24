@@ -325,3 +325,14 @@ De lokale 1.0 is bedoeld voor gebruik in een afgeschermde omgeving. Voor publica
 - Bij een bestaand gelijk account met een andere geheime waarde stopt de volledige import.
 - Vóór schrijven wordt automatisch een herstelpunt gemaakt; bij een schrijffout wordt teruggerold.
 - Geheime waarden staan nooit in Git of in de releasecode: het originele Excelbestand wordt via HTTPS geüpload.
+
+
+## 1.4.0 – PWA, About & dashboard polish
+- **Functie** is nu onderdeel van Basisgegevens en dus ook wijzigbaar als de HR-module uit staat.
+- Basisgegevens wijzigen wist verborgen HR-velden niet langer; geïmporteerde dienstverbandgegevens blijven behouden.
+- Dashboardstatistieken zijn weer klikbaar en navigeren naar het relevante onderdeel.
+- Nieuwe **Over deze applicatie**-sectie met versie/build, credits, AM | Software as a Hobby, AI-assistentillustratie en slogans.
+- PWA manifest en service worker toegevoegd.
+- Installeerbaar op ondersteunde mobiele, tablet- en desktopplatforms; iPhone/iPad krijgen Apple touch icon/meta.
+- Het gekozen Praktijk Schitter Beheer PWA-icoon is toegevoegd in 192, 512, maskable 512 en Apple touch formaat.
+- PWA-cache bevat uitsluitend statische huisstijlbestanden. Personeelsgegevens, accounts, API-responses en andere dynamische applicatiegegevens worden **niet offline gecachet**.

@@ -2,7 +2,7 @@
 {% from "_macros.html" import choice_field %}
 {% block title %}{{ 'Medewerker wijzigen' if employee and not is_new else 'Nieuwe medewerker' }} · {{ app_name }}{% endblock %}
 {% block page_title %}{{ 'Medewerker wijzigen' if employee and not is_new else 'Nieuwe medewerker' }}{% endblock %}
-{% block page_subtitle %}Persoons- en contactgegevens{% if module_enabled('hr_employment') %}, aangevuld met dienstverbandgegevens{% endif %}.{% endblock %}
+{% block page_subtitle %}Basisgegevens, functie en contactgegevens{% if module_enabled('hr_employment') %}, aangevuld met dienstverbandgegevens{% endif %}.{% endblock %}
 
 {% block content %}
 <form method="post" class="card form-card">
@@ -24,6 +24,7 @@
     <label>Geboortedatum
       <input type="date" name="birth_date" value="{{ employee.birth_date if employee else '' }}">
     </label>
+    {{ choice_field('function', 'Functie', settings.choice_lists.function, employee.function if employee else '', placeholder='Bijv. Orthopedagoog') }}
   </div>
 
   <div class="section-title"><h2>Adres & noodcontact</h2><span>Contactgegevens</span></div>
@@ -48,7 +49,6 @@
   {% if module_enabled('hr_employment') %}
   <div class="section-title"><h2>Dienstverband</h2><span>Praktische en contractuele gegevens</span></div>
   <div class="form-grid">
-    {{ choice_field('function', 'Functie', settings.choice_lists.function, employee.function if employee else '', placeholder='Eigen functieomschrijving') }}
     <label>Zakelijk e-mailadres
       <input type="email" name="work_email" value="{{ employee.work_email if employee else '' }}">
     </label>

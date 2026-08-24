@@ -84,7 +84,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "1.3.6"
+APP_VERSION = "1.4.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -2740,6 +2740,57 @@ def offboarding_reset(employee_id):
 
 
 
+
+@app.route("/about")
+@login_required
+def about_page():
+    return render_template(
+        "about.html",
+        build_commit=os.environ.get("RENDER_GIT_COMMIT", "")[:8],
+        environment_name="Render" if IS_RENDER else ("Productie" if IS_PRODUCTION else "Lokaal"),
+    )
+
+
+@app.route("/manifest.webmanifest")
+def web_manifest():
+    settings = load_settings()
+    app_name = settings.get("app_name", "Praktijk Schitter Beheer")
+    manifest = {
+        "name": app_name,
+        "short_name": "Schitter Beheer",
+        "description": "Beheer van medewerkers, bedrijfsmiddelen, accounts, registraties en workflows.",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#ffffff",
+        "theme_color": "#17a5a3",
+        "lang": "nl-NL",
+        "icons": [
+            {"src": url_for("static", filename="pwa/icon-192.png"), "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": url_for("static", filename="pwa/icon-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": url_for("static", filename="pwa/icon-maskable-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        ],
+    }
+    return Response(
+        json.dumps(manifest, ensure_ascii=False),
+        mimetype="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.route("/service-worker.js")
+def service_worker():
+    sw_path = BASE_DIR / "static" / "service-worker.js"
+    return Response(
+        sw_path.read_text(encoding="utf-8"),
+        mimetype="application/javascript",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Service-Worker-Allowed": "/",
+        },
+    )
+
+
 @app.route("/settings/import-excel", methods=["GET"])
 @admin_required
 def settings_import_excel():
@@ -3805,19 +3856,34 @@ def employees_export():
 
 def employee_from_form(existing=None):
     e = normalize_employee(existing or {"id": str(uuid.uuid4())})
-    fields = [
+
+    # Basisvelden are always editable.
+    base_fields = [
         "first_name", "last_name", "email", "phone",
         "address", "postal_code", "city", "birth_date",
         "emergency_name", "emergency_phone",
-        "start_date", "contract_end", "hours", "status",
-        "employment_type", "salary_scale", "work_email",
-        "manager", "notes", "annual_leave_hours", "carryover_leave_hours"
+        "notes",
     ]
-    for field in fields:
+    for field in base_fields:
         e[field] = request.form.get(field, "").strip()
 
+    # Function is deliberately part of the permanent employee core as of 1.4.
+    # It must remain editable even when the optional HR module is disabled.
     e["function"] = _resolve_choice_field(request.form, "function")
-    e["work_location"] = _resolve_choice_field(request.form, "work_location")
+
+    # Never blank hidden HR data when someone edits only the basic profile.
+    if module_enabled("hr_employment"):
+        hr_fields = [
+            "start_date", "contract_end", "hours", "status",
+            "employment_type", "salary_scale", "work_email", "manager",
+        ]
+        for field in hr_fields:
+            e[field] = request.form.get(field, "").strip()
+        e["work_location"] = _resolve_choice_field(request.form, "work_location")
+
+    if module_enabled("leave"):
+        e["annual_leave_hours"] = request.form.get("annual_leave_hours", "0").strip()
+        e["carryover_leave_hours"] = request.form.get("carryover_leave_hours", "0").strip()
 
     e["updated_at"] = datetime.now().isoformat(timespec="seconds")
     e.setdefault("created_at", e["updated_at"])

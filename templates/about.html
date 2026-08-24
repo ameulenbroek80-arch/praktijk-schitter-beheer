@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Over · {{ app_name }}{% endblock %}
+{% block page_title %}Over deze applicatie{% endblock %}
+{% block page_subtitle %}Praktijk Schitter Beheer · gebouwd om werk kleiner te maken.{% endblock %}
+{% block content %}
+<section class="about-layout">
+  <div class="card about-main-card">
+    <div class="about-brand">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="{{ app_name }}">
+      <div>
+        <span class="about-kicker">Praktijk Schitter</span>
+        <h2>{{ app_name }}</h2>
+        <p>{{ app_subtitle }}</p>
+      </div>
+    </div>
+
+    <div class="about-copy">
+      <h3>AM | Software as a Hobby</h3>
+      <blockquote>“If it starts to feel like work, automate it.”</blockquote>
+      <p class="about-secondary">…and if you have no idea how, ask your AI assistant.</p>
+    </div>
+
+    <div class="about-meta-grid">
+      <div><small>Versie</small><strong>{{ app_version }}</strong></div>
+      <div><small>Omgeving</small><strong>{{ environment_name }}</strong></div>
+      <div><small>Build</small><strong>{{ build_commit or 'lokaal' }}</strong></div>
+      <div><small>Copyright</small><strong>© {{ copyright_year }} {{ copyright_owner }}</strong></div>
+    </div>
+
+    <div class="about-install-card">
+      <div>
+        <span class="about-kicker">PWA</span>
+        <h3>Installeer als app</h3>
+        <p>Gebruik Praktijk Schitter Beheer als zelfstandige app op telefoon, tablet, MacBook, Chromebook of Windows-laptop.</p>
+      </div>
+      <button class="btn primary" type="button" id="pwa-install-button" hidden>Installeer app</button>
+      <p class="pwa-manual-note">Op iPhone/iPad: Safari → Deel → <strong>Zet op beginscherm</strong>. Op een MacBook kun je de site in Safari als webapp aan het Dock toevoegen.</p>
+    </div>
+  </div>
+
+  <aside class="card about-ai-card">
+    <img src="{{ url_for('static', filename='about-ai-assistant.png') }}" alt="Illustratie van de AI-assistent van AM | Software as a Hobby">
+    <div class="about-ai-copy">
+      <span class="about-kicker">Credits</span>
+      <h3>I have no idea how to build it, but fortunately I have my AI assistant.</h3>
+      <p>Concept, functionele keuzes en kwaliteitscontrole: AM | Software as a Hobby. Uitwerking en code: in samenwerking met de AI-assistent.</p>
+    </div>
+  </aside>
+</section>
+{% endblock %}

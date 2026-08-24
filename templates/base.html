@@ -7,6 +7,11 @@
   <meta name="theme-color" content="#17a5a3">
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" sizes="any">
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa/apple-touch-icon.png') }}">
+  <link rel="manifest" href="{{ url_for('web_manifest') }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Schitter Beheer">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -35,6 +40,7 @@
       <a class="{{ 'active' if request.endpoint == 'audit_log' else '' }}" href="{{ url_for('audit_log') }}">🕵 <span>Auditlog</span></a>
       <a class="{{ 'active' if request.endpoint in ['settings_page','settings_import_excel','settings_import_excel_preview','settings_import_excel_confirm','user_add','user_delete','user_reset_password','settings_backup'] else '' }}" href="{{ url_for('settings_page') }}">⚙ <span>Instellingen</span></a>
       {% endif %}
+      <a class="{{ 'active' if request.endpoint == 'about_page' else '' }}" href="{{ url_for('about_page') }}">ⓘ <span>Over</span></a>
     </nav>
     <div class="sidebar-user">
       <div class="sidebar-user-profile">
@@ -122,6 +128,39 @@
   });
 
   if (window.innerWidth <= 760 && sidebar) sidebar.setAttribute('aria-hidden', 'true');
+})();
+</script>
+<script>
+(function () {
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("{{ url_for('service_worker') }}").catch(function () {});
+    });
+  }
+
+  let deferredInstallPrompt = null;
+  const installButton = document.getElementById("pwa-install-button");
+
+  window.addEventListener("beforeinstallprompt", function (event) {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    if (installButton) installButton.hidden = false;
+  });
+
+  if (installButton) {
+    installButton.addEventListener("click", async function () {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      installButton.hidden = true;
+    });
+  }
+
+  window.addEventListener("appinstalled", function () {
+    deferredInstallPrompt = null;
+    if (installButton) installButton.hidden = true;
+  });
 })();
 </script>
 </body>

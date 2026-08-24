@@ -5,27 +5,27 @@
 
 {% block content %}
 <section class="stats-grid">
-  <div class="stat-card teal">
+  <a class="stat-card teal stat-card-link" href="{{ url_for('employees') }}" aria-label="Open medewerkers">
     <div class="stat-icon">👥</div>
     <div><strong>{{ stats.total }}</strong><span>Medewerkers</span><small>{{ stats.active }} actief · {{ stats.inactive }} uit dienst</small></div>
-  </div>
+  </a>
   {% if module_enabled('hr_employment') %}
-  <div class="stat-card pink">
+  <a class="stat-card pink stat-card-link" href="{{ url_for('employees') }}" aria-label="Open medewerkers en contracten">
     <div class="stat-icon">◷</div>
     <div><strong>{{ stats.expiring }}</strong><span>Contracten</span><small>lopen binnen 60 dagen af</small></div>
-  </div>
+  </a>
   {% endif %}
   {% if module_enabled('assets') %}
-  <div class="stat-card aqua">
+  <a class="stat-card aqua stat-card-link" href="{{ url_for('assets_overview') }}" aria-label="Open bedrijfsmiddelen">
     <div class="stat-icon">💻</div>
     <div><strong>{{ stats.assets }}</strong><span>Bedrijfsmiddelen</span><small>in de centrale inventaris</small></div>
-  </div>
+  </a>
   {% endif %}
   {% if module_enabled('signals') or module_enabled('registrations') or module_enabled('hr_employment') or module_enabled('assets') %}
-  <div class="stat-card gold">
+  <a class="stat-card gold stat-card-link" href="{% if module_enabled('signals') %}{{ url_for('action_center') }}{% elif module_enabled('registrations') %}{{ url_for('registrations_overview') }}{% else %}{{ url_for('employees') }}{% endif %}" aria-label="Open aandachtspunten">
     <div class="stat-icon">✦</div>
     <div><strong>{{ attention|length }}</strong><span>Aandachtspunten</span><small>actie aanbevolen</small></div>
-  </div>
+  </a>
   {% endif %}
 </section>
 

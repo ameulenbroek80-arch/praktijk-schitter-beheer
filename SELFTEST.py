@@ -7,7 +7,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 BASE_DIR = Path(__file__).resolve().parent
-EXPECTED_VERSION = "1.3.6"
+EXPECTED_VERSION = "1.4.0"
 
 errors = []
 warnings = []
@@ -191,6 +191,43 @@ if "openpyxl" not in (BASE_DIR / "requirements.txt").read_text(encoding="utf-8")
 for template_name in ("import_excel.html", "import_excel_result.html"):
     if not (BASE_DIR / "templates" / template_name).exists():
         errors.append(f"1.3.6: {template_name} ontbreekt.")
+
+# 1.4.0 functional polish + PWA checks.
+if 'APP_VERSION = "1.4.0"' not in source:
+    errors.append("1.4.0: centrale versie ontbreekt.")
+if 'def about_page()' not in source:
+    errors.append("1.4.0: About-route ontbreekt.")
+if 'def web_manifest()' not in source or 'def service_worker()' not in source:
+    errors.append("1.4.0: PWA manifest/service-worker routes ontbreken.")
+if 'if module_enabled("hr_employment"):' not in source or 'e["function"] = _resolve_choice_field' not in source:
+    errors.append("1.4.0: functie/HR-formulierbescherming ontbreekt.")
+base_template = (BASE_DIR / "templates" / "base.html").read_text(encoding="utf-8")
+dashboard_template = (BASE_DIR / "templates" / "dashboard.html").read_text(encoding="utf-8")
+employee_form_template = (BASE_DIR / "templates" / "employee_form.html").read_text(encoding="utf-8")
+if 'rel="manifest"' not in base_template or "serviceWorker.register" not in base_template:
+    errors.append("1.4.0: PWA registratie ontbreekt in base.html.")
+if 'href="{{ url_for(\'about_page\') }}"' not in base_template:
+    errors.append("1.4.0: About ontbreekt in navigatie.")
+if "stat-card-link" not in dashboard_template:
+    errors.append("1.4.0: dashboardkaarten zijn niet klikbaar.")
+if "choice_field('function'" not in employee_form_template:
+    errors.append("1.4.0: Functie ontbreekt in basisformulier.")
+for required_file in (
+    "templates/about.html",
+    "static/about-ai-assistant.png",
+    "static/service-worker.js",
+    "static/pwa/icon-192.png",
+    "static/pwa/icon-512.png",
+    "static/pwa/icon-maskable-512.png",
+    "static/pwa/apple-touch-icon.png",
+):
+    if not (BASE_DIR / required_file).exists():
+        errors.append(f"1.4.0: {required_file} ontbreekt.")
+sw_text = (BASE_DIR / "static" / "service-worker.js").read_text(encoding="utf-8")
+if 'url.pathname.startsWith("/static/")' not in sw_text:
+    errors.append("1.4.0: service worker cachet niet uitsluitend statische assets.")
+if 'Employee pages' not in sw_text or "application data always use the network" not in sw_text:
+    errors.append("1.4.0: privacyregel voor PWA-cache ontbreekt.")
 
 print("Praktijk Schitter Beheer – SELFTEST")
 print("=" * 42)
