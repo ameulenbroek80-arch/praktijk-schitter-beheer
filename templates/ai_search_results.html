@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Zoekresultaten · {{ app_name }}{% endblock %}
+{% block page_title %}Zoekresultaten{% endblock %}
+{% block page_subtitle %}Alle doorzoekbare onderdelen voor "{{ query }}".{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div><h2>Gevonden per onderdeel</h2><p>Trefwoord: {{ search_term or "(geen)" }}</p></div>
+  </div>
+  {% for cat in categories %}
+  <div class="ai-suggestion-block{{ ' ai-suggestion-empty' if cat.count == 0 else '' }}">
+    <p>{{ cat.count }} {{ "resultaat" if cat.count == 1 else "resultaten" }} in {{ cat.label }}.</p>
+    <div class="form-actions"><a class="btn primary" href="{{ cat.url }}">Bekijk in {{ cat.label }}</a></div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

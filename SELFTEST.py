@@ -7,7 +7,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 BASE_DIR = Path(__file__).resolve().parent
-EXPECTED_VERSION = "1.4.0"
+EXPECTED_VERSION = "2.0.0"
 
 errors = []
 warnings = []
@@ -193,8 +193,6 @@ for template_name in ("import_excel.html", "import_excel_result.html"):
         errors.append(f"1.3.6: {template_name} ontbreekt.")
 
 # 1.4.0 functional polish + PWA checks.
-if 'APP_VERSION = "1.4.0"' not in source:
-    errors.append("1.4.0: centrale versie ontbreekt.")
 if 'def about_page()' not in source:
     errors.append("1.4.0: About-route ontbreekt.")
 if 'def web_manifest()' not in source or 'def service_worker()' not in source:

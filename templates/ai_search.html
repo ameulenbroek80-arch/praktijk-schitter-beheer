@@ -1,18 +1,18 @@
 {% extends "base.html" %}
 {% block title %}AI-zoekassistent · {{ app_name }}{% endblock %}
 {% block page_title %}AI-zoekassistent{% endblock %}
-{% block page_subtitle %}Typ een zoekvraag in gewone taal — AI bepaalt alleen wáár te zoeken, nooit wát er te zien is.{% endblock %}
+{% block page_subtitle %}Typ een zoekvraag in gewone taal — de app doorzoekt daarna zelf alle onderdelen tegelijk, nooit wát er te zien is bepaalt AI.{% endblock %}
 {% block content %}
 <div class="card">
   <div class="card-header">
     <div><h2>Hoe dit werkt <span class="badge-pending">proef</span></h2><p>Er gaan nooit wachtwoorden of documentinhoud naar AI.</p></div>
   </div>
   <div class="module-note">
-    AI leest alleen je getypte zoekvraag en bepaalt of je waarschijnlijk een account/code of een
-    document zoekt, en met welk trefwoord. De daadwerkelijke zoekactie gebeurt daarna gewoon lokaal
-    in de app — op naam, type en medewerker — precies zoals het zoekveld dat al op de pagina's
-    Accounts & codes en Documenten staat. Een gevonden account zie je als de gewone tegel; het
-    geheim onthul je daarna zelf met de bestaande knop, zoals altijd.
+    AI leest alleen je getypte zoekvraag en bepaalt het zoektrefwoord. De daadwerkelijke
+    zoekactie gebeurt daarna gewoon lokaal in de app, en wel in alle doorzoekbare onderdelen
+    tegelijk (Medewerkers, Registraties, Bedrijfsmiddelen, Accounts & codes, Documenten) — precies
+    zoals het zoekveld dat al op die pagina's staat. Een gevonden account zie je als de gewone
+    tegel; het geheim onthul je daarna zelf met de bestaande knop, zoals altijd.
   </div>
 </div>
 

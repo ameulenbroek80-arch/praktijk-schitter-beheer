@@ -99,7 +99,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "1.4.0"
+APP_VERSION = "2.0.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -1844,21 +1844,12 @@ def _apply_employee_excel_plan(plan: dict) -> dict:
 
 
 
-@app.route("/assets")
-@admin_required
-@module_required("assets")
-def assets_overview():
+def _search_assets(q: str = ""):
+    """Filtert bedrijfsmiddelen op trefwoord (naam/merk/model/serienummer/medewerker/...) -
+    gedeeld door de /assets-pagina en de AI-zoekassistent."""
     assets = load_assets()
-    employees = [normalize_employee(e) for e in load_employees()]
-    employees_map = {e["id"]: e for e in employees}
-
-    ai_intake_asset = session.pop("_ai_intake_asset", None)
-    ai_prefilled = bool(ai_intake_asset)
-
-    q = request.args.get("q", "").strip().lower()
-    status_filter = request.args.get("status", "").strip()
-    category_filter = request.args.get("category", "").strip()
-
+    employees_map = {e["id"]: e for e in [normalize_employee(x) for x in load_employees()]}
+    q = (q or "").strip().lower()
     rows = []
     for asset in assets:
         row = dict(asset)
@@ -1870,12 +1861,29 @@ def assets_overview():
         ]).lower()
         if q and q not in haystack:
             continue
-        if status_filter and asset.get("status") != status_filter:
-            continue
-        if category_filter and asset.get("category") != category_filter:
-            continue
         rows.append(row)
+    return rows
 
+
+@app.route("/assets")
+@admin_required
+@module_required("assets")
+def assets_overview():
+    assets = load_assets()
+    employees = [normalize_employee(e) for e in load_employees()]
+
+    ai_intake_asset = session.pop("_ai_intake_asset", None)
+    ai_prefilled = bool(ai_intake_asset)
+
+    q = request.args.get("q", "").strip().lower()
+    status_filter = request.args.get("status", "").strip()
+    category_filter = request.args.get("category", "").strip()
+
+    rows = [
+        row for row in _search_assets(q)
+        if (not status_filter or row.get("status") == status_filter)
+        and (not category_filter or row.get("category") == category_filter)
+    ]
     rows.sort(key=lambda a:(a.get("status",""), a.get("category","").lower(), a.get("name","").lower()))
     categories = sorted({a.get("category","Overig") for a in assets if a.get("category")})
     stats = {
@@ -2131,15 +2139,12 @@ def asset_central_delete(asset_id):
 
 
 
-@app.route("/registrations")
-@admin_required
-@module_required("registrations")
-def registrations_overview():
+def _search_registrations(q: str = ""):
+    """Filtert registraties op trefwoord (type/nummer/instelling/medewerker/notitie) -
+    gedeeld door de /registrations-pagina en de AI-zoekassistent."""
     regs = load_registrations()
-    employees = [normalize_employee(e) for e in load_employees()]
-    employees_map = {e["id"]: e for e in employees}
-    q = request.args.get("q", "").strip().lower()
-    status_filter = request.args.get("status", "").strip()
+    employees_map = {e["id"]: e for e in [normalize_employee(x) for x in load_employees()]}
+    q = (q or "").strip().lower()
     today = date.today()
 
     rows = []
@@ -2168,10 +2173,23 @@ def registrations_overview():
         ]).lower()
         if q and q not in haystack:
             continue
-        if status_filter and row["display_status"] != status_filter:
-            continue
         rows.append(row)
+    return rows
 
+
+@app.route("/registrations")
+@admin_required
+@module_required("registrations")
+def registrations_overview():
+    regs = load_registrations()
+    employees = [normalize_employee(e) for e in load_employees()]
+    q = request.args.get("q", "").strip().lower()
+    status_filter = request.args.get("status", "").strip()
+
+    rows = [
+        row for row in _search_registrations(q)
+        if not status_filter or row.get("display_status") == status_filter
+    ]
     rows.sort(key=lambda r:(r.get("expires_at") or "9999-12-31", r.get("employee_name","").lower()))
     stats = {
         "total": len(regs),
@@ -4144,11 +4162,46 @@ def extract_asset_intake(raw_text: str) -> tuple[dict | None, str | None]:
 # gewone, al bestaande tegel - de gebruiker onthult het geheim zelf via de
 # bestaande "Tonen"-knop, precies zoals altijd.
 
+def _run_ai_search(term: str) -> list[dict]:
+    """Doorzoekt in één keer alle doorzoekbare registers (Medewerkers, Registraties,
+    Bedrijfsmiddelen, Accounts & codes, Documenten - de laatste vier alleen als hun
+    module aanstaat) op hetzelfde trefwoord en levert per onderdeel een aantal
+    treffers plus een link naar de al bestaande, gefilterde overzichtspagina. Geen
+    AI-classificatie meer van 'waar' gezocht moet worden - dat bleek in de praktijk
+    onbetrouwbaar (een zoekvraag als een registratiesoort kwam soms niet bij
+    Registraties terecht); zoeken overal tegelijk is simpeler en voorkomt dat."""
+    categories = [{
+        "key": "employees", "label": "Medewerkers",
+        "count": len(_search_employees(term)), "url": url_for("employees", q=term),
+    }]
+    if module_enabled("registrations"):
+        categories.append({
+            "key": "registrations", "label": "Registraties",
+            "count": len(_search_registrations(term)), "url": url_for("registrations_overview", q=term),
+        })
+    if module_enabled("assets"):
+        categories.append({
+            "key": "assets", "label": "Bedrijfsmiddelen",
+            "count": len(_search_assets(term)), "url": url_for("assets_overview", q=term),
+        })
+    if module_enabled("credentials"):
+        categories.append({
+            "key": "credentials", "label": "Accounts & codes",
+            "count": len(_search_credentials(term)[0]), "url": url_for("credentials", q=term),
+        })
+    if module_enabled("documents"):
+        categories.append({
+            "key": "documents", "label": "Documenten",
+            "count": len(_search_documents(term)), "url": url_for("documents", q=term),
+        })
+    return categories
+
+
 def extract_search_intent(query: str) -> tuple[dict | None, str | None]:
-    """Laat een taalmodel een korte zoekvraag omzetten in een zoekdoel
-    ('credentials', 'documents' of 'both') plus een kort trefwoord. Geeft
-    ({"target": ..., "search_term": ...}, None) of (None, foutmelding)
-    terug - nooit een exception naar de route."""
+    """Laat een taalmodel een korte zoekvraag omzetten in een kort trefwoord. Geeft
+    ({"search_term": ...}, None) of (None, foutmelding) terug - nooit een exception
+    naar de route. Kiest zelf geen register meer: de route doorzoekt het trefwoord
+    altijd in alle doorzoekbare registers tegelijk via _run_ai_search()."""
     api_key = os.environ.get("SCHITTER_AI_API_KEY", "").strip()
     if not api_key:
         return None, "Stel SCHITTER_AI_API_KEY in (zie .env.example) om deze proeffunctie te gebruiken."
@@ -4158,20 +4211,14 @@ def extract_search_intent(query: str) -> tuple[dict | None, str | None]:
         return None, "Typ eerst een zoekvraag."
 
     system_prompt = (
-        "Je helpt een zoekvraag in een Nederlandstalig personeelssysteem omzetten in een "
-        "zoekopdracht. Het systeem heeft twee doorzoekbare registers: 'credentials' (accounts, "
-        "wachtwoorden, PIN's, technische sleutels - gekoppeld aan een dienst/systeem en eventueel "
-        "een medewerker) en 'documents' (documenten in personeelsdossiers, zoals VOG, diploma, "
-        "arbeidsovereenkomst - gekoppeld aan een medewerker). Antwoord UITSLUITEND met geldige "
-        "JSON, zonder toelichting en zonder markdown-codeblok, in exact deze vorm: "
-        '{"target": "credentials", "search_term": ""}\n'
-        "Kies voor 'target' de waarde 'credentials' als de vraag gaat over een account, "
-        "wachtwoord, inlog, PIN, code of sleutel; 'documents' als de vraag gaat over een "
-        "document, bestand, diploma, VOG, contract of overeenkomst; 'both' als het onduidelijk is "
-        "of als beide relevant kunnen zijn. Zet in 'search_term' alleen het kernbegrip waarop "
-        "gezocht moet worden (bijvoorbeeld de naam van een medewerker, dienst of documenttype) - "
-        "laat woorden als 'wachtwoord van' of 'document van' weg als de rest van de vraag al "
-        "aangeeft waar gezocht moet worden. Verzin nooit namen die niet in de vraag zelf staan."
+        "Je helpt een zoekvraag in een Nederlandstalig personeelssysteem omzetten in een kort "
+        "zoektrefwoord. Antwoord UITSLUITEND met geldige JSON, zonder toelichting en zonder "
+        "markdown-codeblok, in exact deze vorm: "
+        '{"search_term": ""}\n'
+        "Zet in 'search_term' alleen het kernbegrip waarop gezocht moet worden (bijvoorbeeld de "
+        "naam van een medewerker, dienst, documenttype of registratiesoort zoals VOG of SKJ) - "
+        "laat woorden als 'wachtwoord van', 'document van' of 'zoek' weg als de rest van de vraag "
+        "dat al aangeeft. Verzin nooit namen die niet in de vraag zelf staan."
     )
     text, err = _dispatch_ai_call(api_key, system_prompt, query)
     if err:
@@ -4180,17 +4227,14 @@ def extract_search_intent(query: str) -> tuple[dict | None, str | None]:
     try:
         parsed = _parse_ai_json(text)
     except (json.JSONDecodeError, ValueError):
-        return None, "AI-antwoord kon niet als JSON worden gelezen. Probeer het opnieuw of zoek direct op de accounts- of documentenpagina."
+        return None, "AI-antwoord kon niet als JSON worden gelezen. Probeer het opnieuw of zoek direct op een van de overzichtspagina's."
 
     if not isinstance(parsed, dict):
-        return None, "AI-antwoord had niet de verwachte vorm. Probeer het opnieuw of zoek direct op de accounts- of documentenpagina."
+        return None, "AI-antwoord had niet de verwachte vorm. Probeer het opnieuw of zoek direct op een van de overzichtspagina's."
 
-    target = str(parsed.get("target", "") or "").strip().lower()
-    if target not in ("credentials", "documents", "both"):
-        target = "both"
     search_term = str(parsed.get("search_term", "") or "").strip()[:100]
 
-    return {"target": target, "search_term": search_term}, None
+    return {"search_term": search_term}, None
 
 
 def extract_assistant_intent(prompt: str) -> tuple[dict | None, str | None]:
@@ -4210,10 +4254,12 @@ def extract_assistant_intent(prompt: str) -> tuple[dict | None, str | None]:
     system_prompt = (
         "Je bepaalt welke van een vaste set functies in een Nederlandstalig personeelssysteem "
         "een gebruiker bedoelt met zijn getypte opdracht. Er zijn precies vijf mogelijke "
-        "capabilities: 'search' (iets opzoeken: een account, wachtwoord, inlog, code of sleutel "
-        "in het register 'credentials', of een document zoals VOG, diploma, arbeidsovereenkomst "
-        "in het register 'documents'), 'employee_intake' (een NIEUWE medewerker aanmaken/invoeren "
-        "op basis van geplakte tekst zoals een intake-e-mail met naam, adres, functiegegevens), "
+        "capabilities: 'search' (iets opzoeken: een medewerker, een registratie zoals VOG of "
+        "SKJ, een bedrijfsmiddel, een account/wachtwoord/inlog/code, of een document - bij "
+        "'search' doorzoekt de app zelf altijd alle doorzoekbare onderdelen tegelijk, dus je "
+        "hoeft niet te kiezen waar precies gezocht wordt), 'employee_intake' (een NIEUWE "
+        "medewerker aanmaken/invoeren op basis van geplakte tekst zoals een intake-e-mail met "
+        "naam, adres, functiegegevens), "
         "'asset_intake' (een NIEUW bedrijfsmiddel aanmaken/invoeren op basis van geplakte "
         "tekst zoals een inkoopbon, pakbon of leverancierse-mail met merk, model, serienummer "
         "of assetnummer), "
@@ -4221,13 +4267,11 @@ def extract_assistant_intent(prompt: str) -> tuple[dict | None, str | None]:
         "Actiecentrum), of 'unclear' als geen van deze duidelijk van toepassing is. Antwoord "
         "UITSLUITEND met geldige JSON, zonder toelichting en zonder markdown-codeblok, in exact "
         "deze vorm: "
-        '{"capability": "search", "search_target": "credentials", "search_term": ""}\n'
-        "Vul 'search_target' en 'search_term' alleen zinvol in als capability 'search' is: "
-        "'search_target' is 'credentials', 'documents' of 'both' (zoals hierboven beschreven, "
-        "'both' als onduidelijk of allebei relevant kunnen zijn); 'search_term' is het kernbegrip "
-        "om op te zoeken (bijvoorbeeld een naam), zonder woorden als 'wachtwoord van'. Voor de "
-        "andere capabilities mag 'search_target' 'both' en 'search_term' leeg zijn. Verzin nooit "
-        "namen die niet in de opdracht zelf staan."
+        '{"capability": "search", "search_term": ""}\n'
+        "Vul 'search_term' alleen zinvol in als capability 'search' is: het kernbegrip om op te "
+        "zoeken (bijvoorbeeld een naam of registratiesoort), zonder woorden als 'wachtwoord van' "
+        "of 'zoek'. Voor de andere capabilities mag 'search_term' leeg zijn. Verzin nooit namen "
+        "die niet in de opdracht zelf staan."
     )
     text, err = _dispatch_ai_call(api_key, system_prompt, prompt)
     if err:
@@ -4244,12 +4288,9 @@ def extract_assistant_intent(prompt: str) -> tuple[dict | None, str | None]:
     capability = str(parsed.get("capability", "") or "").strip().lower()
     if capability not in ("search", "employee_intake", "actions_summary", "asset_intake"):
         capability = "unclear"
-    search_target = str(parsed.get("search_target", "") or "").strip().lower()
-    if search_target not in ("credentials", "documents", "both"):
-        search_target = "both"
     search_term = str(parsed.get("search_term", "") or "").strip()[:100]
 
-    return {"capability": capability, "search_target": search_target, "search_term": search_term}, None
+    return {"capability": capability, "search_term": search_term}, None
 
 
 @app.route("/assistant", methods=["GET", "POST"])
@@ -4270,26 +4311,10 @@ def ai_assistant():
         log_action("ai_assistant_routed", detail=f"{capability}: {prompt[:80]}")
 
         if capability == "search":
-            creds_enabled = module_enabled("credentials")
-            docs_enabled = module_enabled("documents")
-            if not creds_enabled and not docs_enabled:
-                flash("De modules Accounts & codes en Documenten staan allebei uit.", "error")
-                return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
-            available = []
-            if creds_enabled:
-                available.append("credentials")
-            if docs_enabled:
-                available.append("documents")
-            target = intent["search_target"] if intent["search_target"] in available else ("both" if len(available) > 1 else available[0])
             term = intent["search_term"]
-            if target == "credentials":
-                return redirect(url_for("credentials", q=term))
-            if target == "documents":
-                return redirect(url_for("documents", q=term))
-            cred_count = len(_search_credentials(term)[0])
-            doc_count = len(_search_documents(term))
-            return render_template("ai_search_both.html", query=prompt, search_term=term,
-                                   cred_count=cred_count, doc_count=doc_count)
+            categories = _run_ai_search(term)
+            return render_template("ai_search_results.html", query=prompt, search_term=term,
+                                   categories=categories)
 
         if capability == "employee_intake":
             return redirect(url_for("employee_ai_intake", raw_text=prompt))
@@ -4336,34 +4361,11 @@ def ai_search():
             flash(err, "error")
             return render_template("ai_search.html", ai_configured=_ai_configured(), query=query)
 
-        log_action("ai_search_interpreted", detail=f"{intent['target']}: {intent['search_term'] or query}")
-        target = intent["target"]
         term = intent["search_term"]
-
-        creds_enabled = module_enabled("credentials")
-        docs_enabled = module_enabled("documents")
-        if not creds_enabled and not docs_enabled:
-            flash("De modules Accounts & codes en Documenten staan allebei uit.", "error")
-            return render_template("ai_search.html", ai_configured=_ai_configured(), query=query)
-
-        available = []
-        if creds_enabled:
-            available.append("credentials")
-        if docs_enabled:
-            available.append("documents")
-        effective_target = target if target in available else ("both" if len(available) > 1 else available[0])
-
-        if effective_target == "credentials":
-            return redirect(url_for("credentials", q=term))
-        if effective_target == "documents":
-            return redirect(url_for("documents", q=term))
-
-        cred_count = len(_search_credentials(term)[0])
-        doc_count = len(_search_documents(term))
-        return render_template(
-            "ai_search_both.html", query=query, search_term=term,
-            cred_count=cred_count, doc_count=doc_count,
-        )
+        log_action("ai_search_interpreted", detail=term or query)
+        categories = _run_ai_search(term)
+        return render_template("ai_search_results.html", query=query, search_term=term,
+                               categories=categories)
 
     return render_template("ai_search.html", ai_configured=_ai_configured(), query="")
 
@@ -4558,17 +4560,25 @@ def dashboard():
         today=datetime.now(),
     )
 
-@app.route("/employees")
-@admin_required
-def employees():
+def _search_employees(q: str = ""):
+    """Filtert medewerkers op naam/functie - gedeeld door de /employees-pagina en
+    de AI-zoekassistent, zodat er precies één plek is die bepaalt wat doorzoekbaar is."""
     items = [normalize_employee(e) for e in load_employees()]
-    q = request.args.get("q", "").strip().lower()
+    q = (q or "").strip().lower()
     if q:
         items = [
             e for e in items
             if q in f"{e.get('first_name','')} {e.get('last_name','')} {e.get('function','')}".lower()
         ]
     items.sort(key=lambda e: (e.get("last_name", "").lower(), e.get("first_name", "").lower()))
+    return items
+
+
+@app.route("/employees")
+@admin_required
+def employees():
+    q = request.args.get("q", "").strip().lower()
+    items = _search_employees(q)
     return render_template("employees.html", employees=items, q=q)
 
 
