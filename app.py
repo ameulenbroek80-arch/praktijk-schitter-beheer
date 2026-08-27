@@ -99,7 +99,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.1.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -3977,6 +3977,45 @@ def generate_ai_action_summary(items: list[dict]) -> tuple[str | None, str | Non
     return _dispatch_ai_call(api_key, system_prompt, user_prompt)
 
 
+def _fallback_action_summary(items: list[dict]) -> str:
+    """Bouwt een korte samenvatting ZONDER AI, puur op basis van de al berekende
+    urgentie/telling uit collect_action_items() - gebruikt als de AI-aanroep faalt
+    (geen sleutel, dagquotum bereikt, netwerkfout). Minder vloeiend dan de AI-versie,
+    maar altijd beschikbaar. Verzint niets: gebruikt uitsluitend titels/aantallen die
+    al in de meegegeven lijst staan."""
+    if not items:
+        return "Geen openstaande acties op dit moment."
+
+    danger = [i for i in items if i.get("severity") == "danger"]
+    warning = [i for i in items if i.get("severity") == "warning"]
+    other = [i for i in items if i.get("severity") not in ("danger", "warning")]
+
+    delen = [
+        f"Er {'is' if len(items) == 1 else 'zijn'} in totaal {len(items)} "
+        f"openstaande actie{'' if len(items) == 1 else 's'}."
+    ]
+    if danger:
+        titels = ", ".join(i.get("title", "") for i in danger[:5])
+        meer = f" en nog {len(danger) - 5} andere" if len(danger) > 5 else ""
+        delen.append(f"Direct urgent ({len(danger)}): {titels}{meer}.")
+    if warning:
+        delen.append(f"Binnenkort actie nodig ({len(warning)}).")
+    if other:
+        delen.append(f"Overig, ter informatie ({len(other)}).")
+    return " ".join(delen)
+
+
+def _action_summary_with_fallback(items: list[dict]) -> tuple[str, bool]:
+    """Probeert eerst de AI-samenvatting; valt bij een AI-fout (geen sleutel, quota,
+    netwerkfout) terug op een sjabloon-samenvatting zonder AI, zodat het Actiecentrum
+    altijd een samenvatting kan tonen in plaats van een foutmelding. Geeft
+    (tekst, ai_gebruikt) terug."""
+    summary, error = generate_ai_action_summary(items)
+    if error:
+        return _fallback_action_summary(items), False
+    return summary, True
+
+
 # ---------- AI-intake voor nieuwe medewerkers (proeffunctie) ----------
 #
 # Test-only integratie: laat een taalmodel vrije tekst (bijv. een intake-e-mail)
@@ -4202,6 +4241,33 @@ def _run_ai_search(term: str) -> list[dict]:
     return categories
 
 
+_SEARCH_FILLER_PATTERNS = [
+    re.compile(r"^zoek(?:\s+naar)?\s+", re.IGNORECASE),
+    re.compile(r"^wachtwoord(?:en)?\s+van\s+", re.IGNORECASE),
+    re.compile(r"^(?:het\s+)?wachtwoord\s+voor\s+", re.IGNORECASE),
+    re.compile(r"^document(?:en)?\s+van\s+", re.IGNORECASE),
+    re.compile(r"^code(?:s)?\s+van\s+", re.IGNORECASE),
+    re.compile(r"^account(?:s)?\s+van\s+", re.IGNORECASE),
+    re.compile(r"^gegevens\s+van\s+", re.IGNORECASE),
+    re.compile(r"^informatie\s+over\s+", re.IGNORECASE),
+    re.compile(r"^info\s+over\s+", re.IGNORECASE),
+]
+
+
+def _fallback_search_term(raw_query: str) -> str:
+    """Best-effort trefwoord-extractie ZONDER AI: haalt veelvoorkomende inleidende
+    woorden weg ('zoek', 'wachtwoord van', ...) zodat zoeken via de zoekpagina/AI-
+    assistent blijft werken als de AI-aanroep faalt (geen sleutel, dagquotum bereikt,
+    netwerkfout). Simpeler dan de AI-versie (herkent geen impliciete synoniemen),
+    maar valt nooit helemaal stil. Nooit een exception."""
+    text = (raw_query or "").strip()
+    for pattern in _SEARCH_FILLER_PATTERNS:
+        match = pattern.match(text)
+        if match:
+            text = text[match.end():].strip()
+    return text[:100] if text else (raw_query or "").strip()[:100]
+
+
 def extract_search_intent(query: str) -> tuple[dict | None, str | None]:
     """Laat een taalmodel een korte zoekvraag omzetten in een kort trefwoord. Geeft
     ({"search_term": ...}, None) of (None, foutmelding) terug - nooit een exception
@@ -4307,10 +4373,27 @@ def ai_assistant():
     al los bestond, en slaat nooit rechtstreeks iets op."""
     if request.method == "POST":
         prompt = request.form.get("prompt", "").strip()
+        if not prompt:
+            flash("Typ eerst een opdracht of vraag.", "error")
+            return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
+
         intent, err = extract_assistant_intent(prompt)
         if err:
-            flash(err, "error")
-            return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
+            # AI kon de opdracht niet classificeren (geen sleutel, dagquotum bereikt,
+            # netwerkfout) - we weten dan niet of een intake bedoeld was, maar zoeken kan
+            # altijd zonder AI. Val daarom terug op zoeken met een lokaal trefwoord, en wijs
+            # op de handmatige formulieren voor de andere twee mogelijkheden.
+            term = _fallback_search_term(prompt)
+            log_action("ai_search_interpreted", detail=f"{term} (AI niet beschikbaar, via assistent)")
+            flash(
+                "AI is niet beschikbaar (geen sleutel ingesteld of dagquotum bereikt) - je tekst "
+                "is als zoekopdracht behandeld. Bedoelde je een nieuwe medewerker of nieuw "
+                "bedrijfsmiddel aanmaken? Gebruik dan het gewone formulier.",
+                "info",
+            )
+            categories = _run_ai_search(term)
+            return render_template("ai_search_results.html", query=prompt, search_term=term,
+                                   categories=categories)
 
         capability = intent["capability"]
         log_action("ai_assistant_routed", detail=f"{capability}: {prompt[:80]}")
@@ -4335,13 +4418,14 @@ def ai_assistant():
                 flash("De module Actiecentrum staat uit.", "error")
                 return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
             items = collect_action_items()
-            summary, summary_err = generate_ai_action_summary(items)
-            if summary_err:
-                session["_ai_action_summary_error"] = summary_err
-            else:
-                session["_ai_action_summary"] = summary
-                session["_ai_action_summary_at"] = datetime.now().strftime("%d-%m-%Y %H:%M")
-                log_action("ai_summary_generated", detail=f"{len(items)} acties samengevat (proef, via AI-assistent)")
+            summary, ai_used = _action_summary_with_fallback(items)
+            session["_ai_action_summary"] = summary
+            session["_ai_action_summary_ai_used"] = ai_used
+            session["_ai_action_summary_at"] = datetime.now().strftime("%d-%m-%Y %H:%M")
+            log_action(
+                "ai_summary_generated",
+                detail=f"{len(items)} acties samengevat ({'AI' if ai_used else 'sjabloon, AI niet beschikbaar'}, via AI-assistent)",
+            )
             return redirect(url_for("action_center"))
 
         flash(
@@ -4361,12 +4445,23 @@ def ai_assistant():
 def ai_search():
     if request.method == "POST":
         query = request.form.get("query", "").strip()
-        intent, err = extract_search_intent(query)
-        if err:
-            flash(err, "error")
+        if not query:
+            flash("Typ eerst een zoekvraag.", "error")
             return render_template("ai_search.html", ai_configured=_ai_configured(), query=query)
 
-        term = intent["search_term"]
+        intent, err = extract_search_intent(query)
+        if err:
+            # AI kon de zoekvraag niet interpreteren (geen sleutel, dagquotum bereikt,
+            # netwerkfout) - zoeken zelf heeft geen AI nodig, dus val terug op een lokaal
+            # bepaald trefwoord in plaats van de zoekfunctie helemaal te blokkeren.
+            term = _fallback_search_term(query)
+            flash(
+                "AI kon deze zoekvraag niet interpreteren (geen sleutel ingesteld of "
+                "dagquotum bereikt) - gezocht op de getypte tekst zelf.",
+                "info",
+            )
+        else:
+            term = intent["search_term"]
         log_action("ai_search_interpreted", detail=term or query)
         categories = _run_ai_search(term)
         return render_template("ai_search_results.html", query=query, search_term=term,
@@ -4391,13 +4486,15 @@ def action_center():
     ai_summary = session.pop("_ai_action_summary", None)
     ai_summary_error = session.pop("_ai_action_summary_error", None)
     ai_summary_at = session.pop("_ai_action_summary_at", None)
+    ai_summary_ai_used = session.pop("_ai_action_summary_ai_used", True)
     return render_template("actions.html", items=items, counts=counts,
                            onboarding_workflows=onboarding_workflows,
                            offboarding_workflows=offboarding_workflows,
                            ai_configured=_ai_configured(),
                            ai_summary=ai_summary,
                            ai_summary_error=ai_summary_error,
-                           ai_summary_at=ai_summary_at)
+                           ai_summary_at=ai_summary_at,
+                           ai_summary_ai_used=ai_summary_ai_used)
 
 
 @app.route("/actions/ai-summary", methods=["POST"])
@@ -4405,13 +4502,14 @@ def action_center():
 @module_required("signals")
 def action_center_ai_summary():
     items = collect_action_items()
-    summary, error = generate_ai_action_summary(items)
-    if error:
-        session["_ai_action_summary_error"] = error
-    else:
-        session["_ai_action_summary"] = summary
-        session["_ai_action_summary_at"] = datetime.now().strftime("%d-%m-%Y %H:%M")
-        log_action("ai_summary_generated", detail=f"{len(items)} acties samengevat (proef)")
+    summary, ai_used = _action_summary_with_fallback(items)
+    session["_ai_action_summary"] = summary
+    session["_ai_action_summary_ai_used"] = ai_used
+    session["_ai_action_summary_at"] = datetime.now().strftime("%d-%m-%Y %H:%M")
+    log_action(
+        "ai_summary_generated",
+        detail=f"{len(items)} acties samengevat ({'AI' if ai_used else 'sjabloon, AI niet beschikbaar'})",
+    )
     return redirect(url_for("action_center"))
 
 

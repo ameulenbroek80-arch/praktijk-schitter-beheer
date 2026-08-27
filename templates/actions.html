@@ -18,7 +18,7 @@
   {% if ai_summary_error %}
   <div class="compact-empty">{{ ai_summary_error }}</div>
   {% else %}
-  <div class="ai-summary-text">{{ ai_summary }}{% if ai_summary_at %}<span class="ai-summary-meta">Gegenereerd om {{ ai_summary_at }}</span>{% endif %}</div>
+  <div class="ai-summary-text">{{ ai_summary }}{% if ai_summary_at %}<span class="ai-summary-meta">Gegenereerd om {{ ai_summary_at }}{% if not ai_summary_ai_used %} — automatisch sjabloon, AI was niet beschikbaar{% endif %}</span>{% endif %}</div>
   {% endif %}
 </section>
 {% endif %}
