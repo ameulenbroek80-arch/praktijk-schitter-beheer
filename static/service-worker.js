@@ -1,4 +1,4 @@
-const CACHE_NAME = "praktijk-schitter-static-v1.4.0";
+const CACHE_NAME = "praktijk-schitter-static-__APP_VERSION__";
 const STATIC_ASSETS = [
   "/static/style.css",
   "/static/logo.png",

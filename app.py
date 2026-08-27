@@ -2963,8 +2963,13 @@ def web_manifest():
 @app.route("/service-worker.js")
 def service_worker():
     sw_path = BASE_DIR / "static" / "service-worker.js"
+    # De cachenaam in service-worker.js bevat een __APP_VERSION__-placeholder die we hier
+    # invullen met de actuele APP_VERSION. Zo dwingt elke versiebump automatisch een verse
+    # service-worker-cache af bij alle gebruikers, zonder dat we een aparte, losstaande
+    # cache-versiestring handmatig moeten bijhouden (dezelfde valkuil als APP_VERSION zelf).
+    sw_source = sw_path.read_text(encoding="utf-8").replace("__APP_VERSION__", APP_VERSION)
     return Response(
-        sw_path.read_text(encoding="utf-8"),
+        sw_source,
         mimetype="application/javascript",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
