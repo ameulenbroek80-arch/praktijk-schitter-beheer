@@ -2,3 +2,8 @@ Flask>=3.0,<4
 cryptography>=42,<46
 gunicorn>=22,<24
 openpyxl>=3.1,<4
+
+# Optioneel, voor lokale documentinhoud-doorzoekfunctie (.pdf/.docx) - werkt zonder
+# deze twee ook, alleen dan alleen op .txt-bestanden (zie CONTENT_SEARCH_EXTENSIONS)
+pypdf>=4,<6
+python-docx>=1,<2

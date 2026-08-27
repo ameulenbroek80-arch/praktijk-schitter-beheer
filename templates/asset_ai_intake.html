@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}AI-intake nieuw bedrijfsmiddel · {{ app_name }}{% endblock %}
+{% block page_title %}AI-intake nieuw bedrijfsmiddel{% endblock %}
+{% block page_subtitle %}Plak een tekst met gegevens van een nieuw bedrijfsmiddel — AI stelt een concept voor, jij controleert en beslist.{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div><h2>Hoe dit werkt <span class="badge-pending">proef</span></h2><p>Niets wordt automatisch opgeslagen.</p></div>
+  </div>
+  <div class="module-note">
+    AI leest de geplakte tekst (bijvoorbeeld een inkoopbon, pakbon of leverancierse-mail) en stelt
+    een concept voor het aanmaakformulier van het bedrijfsmiddel voor. Je komt daarna terug op de
+    bedrijfsmiddelenpagina, waar het formulier automatisch met dit concept geopend is — elk veld
+    is nog te wijzigen, en er wordt pas iets vastgelegd zodra jij zelf op Toevoegen klikt. Test dit
+    alleen met verzonnen testgegevens, nooit met gegevens van een echt bedrijfsmiddel dat nog in
+    onderzoek is.
+  </div>
+</div>
+
+{% if not ai_configured %}
+<div class="card"><div class="compact-empty">Nog niet actief. Zet <code>SCHITTER_AI_API_KEY</code> in je lokale omgeving om dit te proberen (zie <code>.env.example</code>).</div></div>
+{% else %}
+<form method="post" class="card form-card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="section-title"><h2>Tekst plakken</h2><span>Bijvoorbeeld een inkoopbon of leverancierse-mail</span></div>
+  <label>Tekst met gegevens van het nieuwe bedrijfsmiddel
+    <textarea name="raw_text" rows="12" placeholder="Merk, model, serienummer, eventueel aankoopdatum of garantie...">{{ raw_text }}</textarea>
+  </label>
+  <div class="form-actions">
+    <a class="btn secondary" href="{{ url_for('assets_overview') }}">Annuleren</a>
+    <button class="btn primary" type="submit">Concept maken</button>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

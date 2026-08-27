@@ -55,21 +55,24 @@
   <form method="post" action="{{ url_for('asset_central_add') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="dialog-head"><div><h2>Nieuw bedrijfsmiddel</h2><p>Voeg het middel toe aan de centrale inventaris.</p></div><button type="button" class="icon-btn" onclick="this.closest('dialog').close()">×</button></div>
+    {% if ai_prefilled %}
+    <div class="module-note">Voorgesteld door AI op basis van de geplakte tekst (proef) — controleer elk veld voordat je toevoegt.</div>
+    {% endif %}
     <div class="form-grid">
-      {{ choice_field('asset_type', 'Type', settings.choice_lists.asset_type, required=True, placeholder='Ander type bedrijfsmiddel') }}
-      <label>Naam *<input name="name" required placeholder="bijv. MacBook Air receptie"></label>
-      <label>Merk<input name="brand"></label>
-      <label>Model<input name="model"></label>
-      <label>Assetnummer<input name="asset_number"></label>
-      <label>Serienummer<input name="serial_number"></label>
-      <label>IMEI<input name="imei"></label>
-      <label>Telefoonnummer<input name="phone_number"></label>
-      {{ choice_field('provider', 'Provider', settings.choice_lists.provider, placeholder='Andere provider') }}
-      {{ choice_field('os', 'Besturingssysteem', settings.choice_lists.os, placeholder='Ander besturingssysteem') }}
-      <label>PIN<input name="pin" autocomplete="off"></label>
-      <label>PUK<input name="puk" autocomplete="off"></label>
-      <label>Aankoopdatum<input type="date" name="purchase_date"></label>
-      <label>Garantie t/m<input type="date" name="warranty_until"></label>
+      {{ choice_field('asset_type', 'Type', settings.choice_lists.asset_type, current_value=ai_intake_asset.category if ai_intake_asset else '', required=True, placeholder='Ander type bedrijfsmiddel') }}
+      <label>Naam *<input name="name" required placeholder="bijv. MacBook Air receptie" value="{{ ai_intake_asset.name if ai_intake_asset else '' }}"></label>
+      <label>Merk<input name="brand" value="{{ ai_intake_asset.brand if ai_intake_asset else '' }}"></label>
+      <label>Model<input name="model" value="{{ ai_intake_asset.model if ai_intake_asset else '' }}"></label>
+      <label>Assetnummer<input name="asset_number" value="{{ ai_intake_asset.asset_number if ai_intake_asset else '' }}"></label>
+      <label>Serienummer<input name="serial_number" value="{{ ai_intake_asset.serial_number if ai_intake_asset else '' }}"></label>
+      <label>IMEI<input name="imei" value="{{ ai_intake_asset.imei if ai_intake_asset else '' }}"></label>
+      <label>Telefoonnummer<input name="phone_number" value="{{ ai_intake_asset.phone_number if ai_intake_asset else '' }}"></label>
+      {{ choice_field('provider', 'Provider', settings.choice_lists.provider, current_value=ai_intake_asset.provider if ai_intake_asset else '', placeholder='Andere provider') }}
+      {{ choice_field('os', 'Besturingssysteem', settings.choice_lists.os, current_value=ai_intake_asset.os if ai_intake_asset else '', placeholder='Ander besturingssysteem') }}
+      <label>PIN<input name="pin" autocomplete="off" value="{{ ai_intake_asset.pin if ai_intake_asset else '' }}"></label>
+      <label>PUK<input name="puk" autocomplete="off" value="{{ ai_intake_asset.puk if ai_intake_asset else '' }}"></label>
+      <label>Aankoopdatum<input type="date" name="purchase_date" value="{{ ai_intake_asset.purchase_date if ai_intake_asset else '' }}"></label>
+      <label>Garantie t/m<input type="date" name="warranty_until" value="{{ ai_intake_asset.warranty_until if ai_intake_asset else '' }}"></label>
     </div>
     <div class="section-title"><h3>Direct uitgeven <small>(optioneel)</small></h3></div>
     <div class="form-grid">
@@ -77,9 +80,12 @@
       <label>Uitgiftedatum<input type="date" name="issued_at"></label>
       <label>Retour verwacht<input type="date" name="return_due"></label>
     </div>
-    <label>Accessoires<textarea name="accessories" rows="2"></textarea></label>
-    <label>Notitie<textarea name="notes" rows="3"></textarea></label>
+    <label>Accessoires<textarea name="accessories" rows="2">{{ ai_intake_asset.accessories if ai_intake_asset else '' }}</textarea></label>
+    <label>Notitie<textarea name="notes" rows="3">{{ ai_intake_asset.notes if ai_intake_asset else '' }}</textarea></label>
     <div class="form-actions"><button type="button" class="btn secondary" onclick="this.closest('dialog').close()">Annuleren</button><button class="btn primary">Toevoegen</button></div>
   </form>
 </dialog>
+{% if ai_prefilled %}
+<script>document.addEventListener("DOMContentLoaded", function () { document.getElementById("newAsset").showModal(); });</script>
+{% endif %}
 {% endblock %}

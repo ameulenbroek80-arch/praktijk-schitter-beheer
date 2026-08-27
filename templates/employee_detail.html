@@ -216,6 +216,30 @@
     <div><h2>Registraties</h2><p>Registraties en certificaten van {{ employee.first_name }}</p></div>
     <a class="btn primary" href="{{ url_for('registrations_overview') }}">Centraal register openen</a>
   </div>
+  {% if ai_pending_registrations %}
+  <div class="module-note"><strong>AI stelt voor</strong> op basis van de zojuist geplakte tekst (proef) — controleer elk voorstel en voeg apart toe, of negeer het.</div>
+  {% for s in ai_pending_registrations %}
+  <div class="ai-suggestion-block">
+    <form method="post" action="{{ url_for('registration_central_add') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="employee_id" value="{{ employee.id }}">
+      <input type="hidden" name="ai_sid" value="{{ s.sid }}">
+      <div class="form-grid">
+        {{ choice_field('registration_type', 'Type', settings.choice_lists.registration_type, s.type, placeholder='Ander type') }}
+        <label>Nummer<input name="number" value="{{ s.number }}"></label>
+        <label>Instantie<input name="institution" value="{{ s.institution }}"></label>
+        <label>Datum registratie<input type="date" name="obtained_at" value="{{ s.obtained_at }}"></label>
+        <label>Geldig tot<input type="date" name="expires_at" value="{{ s.expires_at }}"></label>
+        <label>Notitie<input name="notes" value="{{ s.notes }}"></label>
+      </div>
+      <div class="form-actions">
+        <button class="btn secondary tiny" type="submit" formaction="{{ url_for('ai_intake_registration_dismiss', employee_id=employee.id, sid=s.sid) }}">Negeren</button>
+        <button class="btn primary tiny" type="submit">Toevoegen</button>
+      </div>
+    </form>
+  </div>
+  {% endfor %}
+  {% endif %}
   {% if employee_registrations %}
   <div class="record-list">
     {% for r in employee_registrations %}

@@ -7,6 +7,9 @@
 {% block content %}
 <form method="post" class="card form-card">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if ai_prefilled %}
+  <div class="module-note">Voorgesteld door AI op basis van de geplakte tekst (proef) — controleer elk veld voordat je opslaat.</div>
+  {% endif %}
   <div class="section-title"><h2>Persoonsgegevens</h2><span>Basisgegevens van de medewerker</span></div>
   <div class="form-grid">
     <label>Voornaam *

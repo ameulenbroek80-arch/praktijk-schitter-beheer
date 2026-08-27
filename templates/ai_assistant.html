@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}AI-assistent · {{ app_name }}{% endblock %}
+{% block page_title %}AI-assistent{% endblock %}
+{% block page_subtitle %}Typ in gewone taal wat je wilt — de assistent stuurt je door naar de juiste plek.{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div><h2>Hoe dit werkt <span class="badge-pending">proef</span></h2><p>Eén plek voor alle AI-proeffuncties in deze app.</p></div>
+  </div>
+  <div class="module-note">
+    AI leest alleen je getypte opdracht en herkent of je iets wilt <strong>opzoeken</strong> (een
+    account/code of een document), een <strong>nieuwe medewerker</strong> of <strong>nieuw
+    bedrijfsmiddel wilt invoeren</strong> op basis van geplakte tekst, of een <strong>samenvatting
+    van het Actiecentrum</strong> wilt. Je komt
+    daarna altijd op de bestaande, al geteste pagina of het bestaande formulier terecht — er wordt
+    nooit automatisch iets opgeslagen, en een gevonden account toon je nog steeds als de gewone
+    tegel; het geheim onthul je zelf met de bestaande knop. Test dit alleen met verzonnen
+    testgegevens, nooit met gegevens van een echte collega.
+  </div>
+</div>
+
+{% if not ai_configured %}
+<div class="card"><div class="compact-empty">Nog niet actief. Zet <code>SCHITTER_AI_API_KEY</code> in je lokale omgeving om dit te proberen (zie <code>.env.example</code>).</div></div>
+{% else %}
+<form method="post" class="card form-card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Wat wil je doen?
+    <textarea name="prompt" rows="4" placeholder="bijv. 'wachtwoord van Jan', 'nieuwe medewerker: Jan Jansen, geboren...', 'nieuw bedrijfsmiddel: MacBook Air, serienummer...', of 'samenvatting van het actiecentrum'" autofocus>{{ prompt }}</textarea>
+  </label>
+  <div class="form-actions">
+    <button class="btn primary" type="submit">Versturen</button>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

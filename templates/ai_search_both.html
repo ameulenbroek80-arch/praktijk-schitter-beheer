@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Zoekresultaten · {{ app_name }}{% endblock %}
+{% block page_title %}Zoekresultaten{% endblock %}
+{% block page_subtitle %}AI kon niet met zekerheid kiezen tussen accounts en documenten voor "{{ query }}".{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div><h2>Kies waar je wilt zoeken</h2><p>Trefwoord: {{ search_term or "(geen)" }}</p></div>
+  </div>
+  <div class="ai-suggestion-block">
+    <p>{{ cred_count }} mogelijk{{ "" if cred_count == 1 else "e" }} account(s)/code(s) gevonden.</p>
+    <div class="form-actions"><a class="btn primary" href="{{ url_for('credentials', q=search_term) }}">Bekijk in Accounts & codes</a></div>
+  </div>
+  <div class="ai-suggestion-block">
+    <p>{{ doc_count }} mogelijk{{ "" if doc_count == 1 else "e" }} document(en) gevonden.</p>
+    <div class="form-actions"><a class="btn primary" href="{{ url_for('documents', q=search_term) }}">Bekijk in Documenten</a></div>
+  </div>
+</div>
+{% endblock %}

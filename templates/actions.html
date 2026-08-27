@@ -10,6 +10,19 @@
   <div class="stat-card aqua"><div class="stat-icon">i</div><div><strong>{{ counts.info }}</strong><span>Ter informatie</span><small>niet urgent</small></div></div>
 </section>
 
+{% if ai_summary or ai_summary_error %}
+<section class="card ai-summary-card">
+  <div class="card-header">
+    <div><h2>AI-samenvatting <span class="badge-pending">proef</span></h2><p>Herformuleert de acties hiernaast in gewone taal — verzint niets nieuws. Gegenereerd via de <a href="{{ url_for('ai_assistant') }}">AI-assistent</a>.</p></div>
+  </div>
+  {% if ai_summary_error %}
+  <div class="compact-empty">{{ ai_summary_error }}</div>
+  {% else %}
+  <div class="ai-summary-text">{{ ai_summary }}{% if ai_summary_at %}<span class="ai-summary-meta">Gegenereerd om {{ ai_summary_at }}</span>{% endif %}</div>
+  {% endif %}
+</section>
+{% endif %}
+
 <div class="detail-grid">
   <div class="card">
     <div class="card-header">

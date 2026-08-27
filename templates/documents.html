@@ -1,5 +1,20 @@
 {% extends "base.html" %}{% block page_title %}Documenten{% endblock %}{% block page_subtitle %}Alle documenten uit de personeelsdossiers op één plek.{% endblock %}{% block content %}
-<div class="card"><div class="card-header"><div><h2>Documentenregister</h2><p>{{ documents|length }} documenten</p></div></div>
+<div class="card">
+<div class="card-header asset-toolbar">
+  <form method="get" class="search-form asset-search">
+    <input name="q" value="{{ q }}" placeholder="Zoek titel, type, medewerker…">
+    <select name="type">
+      <option value="">Alle typen</option>
+      {% for t in document_types %}<option value="{{ t }}" {{ 'selected' if type_filter==t else '' }}>{{ t }}</option>{% endfor %}
+    </select>
+    <label style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:14px;white-space:nowrap"><input type="checkbox" name="content" value="1" {{ 'checked' if search_content else '' }}> Ook in documentinhoud zoeken</label>
+    <button class="btn secondary">Filteren</button>
+  </form>
+</div>
+<div class="module-note">
+  Documentinhoud doorzoeken gebeurt volledig lokaal (tekst uit het bestand halen en op trefwoord vergelijken) — er gaat hierbij nooit iets naar AI of een externe partij. Dit werkt voor: {{ content_search_extensions|join(', ') }}. Andere bestandstypen (zoals .doc, .xls/.xlsx of afbeeldingen) worden niet op inhoud doorzocht en blijven alleen vindbaar op titel, type of medewerker. Bij veel of grote documenten kan dit iets langer duren dan een gewone zoekopdracht.
+</div>
+<div class="card-header"><div><h2>Documentenregister</h2><p>{{ documents|length }} documenten</p></div></div>
 {% if documents %}<div class="table-wrap"><table><thead><tr><th>Document</th><th>Type</th><th>Medewerker</th><th>Toegevoegd</th><th></th></tr></thead><tbody>
-{% for d in documents %}<tr><td><strong>{{ d.title }}</strong></td><td>{{ d.type }}</td><td>{{ d.employee_name }}</td><td>{{ d.uploaded_at[:10] }}</td><td><a class="btn secondary" target="_blank" href="{{ url_for('document_download',employee_id=d.employee_id,document_id=d.id) }}">Openen</a></td></tr>{% endfor %}
+{% for d in documents %}<tr><td><strong>{{ d.title }}</strong>{% if d.matched_in == 'inhoud' %} <span class="badge-pending">gevonden in inhoud</span>{% endif %}</td><td>{{ d.type }}</td><td>{{ d.employee_name }}</td><td>{{ d.uploaded_at[:10] }}</td><td><a class="btn secondary" target="_blank" href="{{ url_for('document_download',employee_id=d.employee_id,document_id=d.id) }}">Openen</a></td></tr>{% endfor %}
 </tbody></table></div>{% else %}<div class="compact-empty">Nog geen documenten toegevoegd.</div>{% endif %}</div>{% endblock %}

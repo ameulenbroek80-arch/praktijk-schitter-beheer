@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}AI-intake nieuwe medewerker · {{ app_name }}{% endblock %}
+{% block page_title %}AI-intake nieuwe medewerker{% endblock %}
+{% block page_subtitle %}Plak een tekst met gegevens van een nieuwe medewerker — AI stelt een concept voor, jij controleert en beslist.{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div><h2>Hoe dit werkt <span class="badge-pending">proef</span></h2><p>Niets wordt automatisch opgeslagen.</p></div>
+  </div>
+  <div class="module-note">
+    AI leest de geplakte tekst en stelt een concept voor het aanmaakformulier van de medewerker voor,
+    plus eventuele registraties zoals VOG of SKJ die in de tekst genoemd worden. Je komt daarna gewoon
+    op het normale, al gevalideerde formulier terecht — elk veld is nog te wijzigen, en er wordt pas
+    iets vastgelegd zodra jij zelf op Opslaan of Toevoegen klikt. Test dit alleen met verzonnen
+    testgegevens, nooit met gegevens van een echte collega.
+  </div>
+</div>
+
+{% if not ai_configured %}
+<div class="card"><div class="compact-empty">Nog niet actief. Zet <code>SCHITTER_AI_API_KEY</code> in je lokale omgeving om dit te proberen (zie <code>.env.example</code>).</div></div>
+{% else %}
+<form method="post" class="card form-card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="section-title"><h2>Tekst plakken</h2><span>Bijvoorbeeld een intake-e-mail</span></div>
+  <label>Tekst met gegevens van de nieuwe medewerker
+    <textarea name="raw_text" rows="12" placeholder="Naam, adres, functie, eventueel VOG-gegevens…">{{ raw_text }}</textarea>
+  </label>
+  <div class="form-actions">
+    <a class="btn secondary" href="{{ url_for('employees') }}">Annuleren</a>
+    <button class="btn primary" type="submit">Concept maken</button>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

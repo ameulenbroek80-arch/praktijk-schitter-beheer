@@ -21,6 +21,8 @@ from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
 from urllib.parse import quote
+import urllib.error
+import urllib.request
 
 from cryptography.fernet import Fernet, InvalidToken
 from flask import (
@@ -29,6 +31,19 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
+
+# Lokale tekstextractie voor het doorzoeken van documentinhoud (uitsluitend lokaal -
+# er gaat hierbij nooit iets naar een taalmodel of andere externe partij). Optionele
+# bibliotheken: als ze niet geinstalleerd zijn, wordt dat bestandstype simpelweg niet
+# op inhoud doorzocht (nette degradatie, geen crash).
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
+try:
+    import docx as _docx_lib
+except ImportError:
+    _docx_lib = None
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -799,6 +814,7 @@ def inject_app_configuration():
         "app_version": APP_VERSION,
         "copyright_owner": COPYRIGHT_OWNER,
         "copyright_year": datetime.now().year,
+        "ai_configured": _ai_configured(),
     }
 
 
@@ -1836,6 +1852,9 @@ def assets_overview():
     employees = [normalize_employee(e) for e in load_employees()]
     employees_map = {e["id"]: e for e in employees}
 
+    ai_intake_asset = session.pop("_ai_intake_asset", None)
+    ai_prefilled = bool(ai_intake_asset)
+
     q = request.args.get("q", "").strip().lower()
     status_filter = request.args.get("status", "").strip()
     category_filter = request.args.get("category", "").strip()
@@ -1868,7 +1887,8 @@ def assets_overview():
     return render_template("assets.html", assets=rows, employees=employees, categories=categories,
                            statuses=ASSET_STATUSES, stats=stats, q=q,
                            status_filter=status_filter, category_filter=category_filter,
-                           settings=load_settings())
+                           settings=load_settings(), ai_intake_asset=ai_intake_asset,
+                           ai_prefilled=ai_prefilled)
 
 
 @app.route("/assets/add", methods=["POST"])
@@ -1925,6 +1945,25 @@ def asset_central_add():
     log_action("asset_created", detail=name, target=asset["id"])
     flash("Bedrijfsmiddel toegevoegd.", "success")
     return redirect(url_for("asset_detail", asset_id=asset["id"]))
+
+
+@app.route("/assets/ai-intake", methods=["GET", "POST"])
+@admin_required
+@module_required("assets")
+def asset_ai_intake():
+    if request.method == "POST":
+        raw_text = request.form.get("raw_text", "").strip()
+        data, err = extract_asset_intake(raw_text)
+        if err:
+            flash(err, "error")
+            return render_template("asset_ai_intake.html", ai_configured=_ai_configured(), raw_text=raw_text)
+
+        session["_ai_intake_asset"] = data["asset"]
+        log_action("ai_intake_extracted", detail="bedrijfsmiddel voorgesteld (proef)")
+        flash("Concept gemaakt. Controleer elk veld voordat je opslaat.", "success")
+        return redirect(url_for("assets_overview"))
+
+    return render_template("asset_ai_intake.html", ai_configured=_ai_configured(), raw_text=request.args.get("raw_text", ""))
 
 
 @app.route("/assets/<asset_id>")
@@ -2178,7 +2217,16 @@ def registration_central_add():
     regs.append(reg)
     save_registrations(regs)
     log_action("registration_created", detail=reg_type, target=reg["id"])
+    ai_sid = request.form.get("ai_sid", "").strip()
+    if ai_sid and session.get("_ai_intake_registrations_for") == employee_id:
+        remaining = [r for r in session.get("_ai_intake_registrations", []) if r.get("sid") != ai_sid]
+        session["_ai_intake_registrations"] = remaining
+        if not remaining:
+            session.pop("_ai_intake_registrations_for", None)
+            session.pop("_ai_intake_registrations", None)
     flash("Registratie toegevoegd.", "success")
+    if ai_sid:
+        return redirect(url_for("employee_detail", employee_id=employee_id, tab="registrations"))
     return redirect(url_for("registrations_overview"))
 
 
@@ -2221,23 +2269,25 @@ def registration_central_delete(registration_id):
 
 
 
-@app.route("/credentials")
-@admin_required
-@module_required("credentials")
-def credentials():
+def _search_credentials(q: str = "", scope_filter: str = "", type_filter: str = ""):
+    """Filtert accounts/codes op trefwoord/scope/soort. Geeft nooit het geheim
+    zelf terug (alleen metadata) - gedeeld door de /credentials-pagina en de
+    AI-zoekassistent, zodat er precies één plek is die bepaalt welke velden
+    doorzoekbaar zijn."""
     records = load_credentials()
     employees = sorted(
         [normalize_employee(e) for e in load_employees()],
         key=lambda e:(e.get("last_name","").lower(), e.get("first_name","").lower())
     )
     employees_map = {e["id"]: e for e in employees}
-    q = request.args.get("q", "").strip().lower()
-    scope_filter = request.args.get("scope", "").strip()
-    type_filter = request.args.get("secret_type", "").strip()
+    q = (q or "").strip().lower()
+    scope_filter = (scope_filter or "").strip()
+    type_filter = (type_filter or "").strip()
 
     rows = []
     for record in records:
         row = dict(record)
+        row.pop("secret", None)
         row["employee_names"] = credential_employee_names(record, employees_map)
         if record.get("scope") == "Praktijkbreed":
             row["owner_label"] = "Praktijk / algemeen"
@@ -2266,6 +2316,17 @@ def credentials():
         "shared": sum(1 for r in records if r.get("scope") == "Gedeeld"),
         "practice": sum(1 for r in records if r.get("scope") == "Praktijkbreed"),
     }
+    return rows, stats, employees
+
+
+@app.route("/credentials")
+@admin_required
+@module_required("credentials")
+def credentials():
+    q = request.args.get("q", "").strip().lower()
+    scope_filter = request.args.get("scope", "").strip()
+    type_filter = request.args.get("secret_type", "").strip()
+    rows, stats, employees = _search_credentials(q, scope_filter, type_filter)
     return render_template(
         "credentials.html",
         records=rows,
@@ -2409,17 +2470,120 @@ def credential_delete(credential_id):
     return redirect(url_for("credentials"))
 
 
+DOCUMENT_TYPES = [
+    "Arbeidsovereenkomst", "VOG", "Diploma", "Identificatie",
+    "Functioneringsgesprek", "Beoordeling", "Verlof / verzuim", "Overig",
+]
+
+# Welke bestandstypen daadwerkelijk op inhoud doorzocht kunnen worden, afhankelijk
+# van welke optionele bibliotheken beschikbaar zijn. .txt kan altijd (kale tekst,
+# geen bibliotheek nodig). .doc (oud Word-formaat), .xls/.xlsx en afbeeldingen
+# worden bewust NIET ondersteund (geen OCR, geen fragiele extractie) - hard
+# weigeren in plaats van onbetrouwbaar gokken.
+CONTENT_SEARCH_EXTENSIONS = {"txt"}
+if PdfReader is not None:
+    CONTENT_SEARCH_EXTENSIONS.add("pdf")
+if _docx_lib is not None:
+    CONTENT_SEARCH_EXTENSIONS.add("docx")
+
+
+def _read_document_bytes(employee_id: str, doc: dict) -> bytes | None:
+    """Leest de ruwe bytes van een documentbestand van schijf, ontsleuteld indien
+    nodig. Puur lezen, zonder de migratie-bijwerking die /documents/<id> wel heeft
+    voor oude onversleutelde bestanden - alleen gebruikt voor de lokale
+    inhoud-zoekfunctie. Geeft None terug bij elk probleem (bestand weg, corrupt
+    token, etc.) - nooit een exception naar de aanroeper."""
+    try:
+        file_path = DOCUMENTS_DIR / employee_id / doc["stored_name"]
+        if not file_path.exists():
+            return None
+        raw = file_path.read_bytes()
+        if doc.get("encrypted"):
+            try:
+                return _get_fernet().decrypt(raw)
+            except InvalidToken:
+                return None
+        return raw
+    except OSError:
+        return None
+
+
+def _extract_document_text(raw_bytes: bytes, extension: str) -> str:
+    """Haalt platte tekst uit een documentbestand voor de lokale (niet-AI)
+    inhoud-zoekfunctie. Werkt UITSLUITEND lokaal - er gaat nooit iets naar een
+    taalmodel of externe partij, dit is gewone tekstextractie plus lokale
+    string-matching. Geeft een lege string terug bij een niet-ondersteund
+    bestandstype of een extractiefout (hard weigeren i.p.v. gokken), nooit een
+    exception naar de aanroeper."""
+    extension = (extension or "").strip().lower().lstrip(".")
+    try:
+        if extension == "txt":
+            return raw_bytes.decode("utf-8", errors="ignore")
+        if extension == "pdf" and PdfReader is not None:
+            reader = PdfReader(io.BytesIO(raw_bytes))
+            return "\n".join((page.extract_text() or "") for page in reader.pages)
+        if extension == "docx" and _docx_lib is not None:
+            doc = _docx_lib.Document(io.BytesIO(raw_bytes))
+            return "\n".join(p.text for p in doc.paragraphs)
+    except Exception:
+        return ""
+    return ""
+
+
+def _search_documents(q: str = "", type_filter: str = "", employee_id: str = "", search_content: bool = False):
+    """Filtert het documentenregister op trefwoord/type/medewerker. Zoekt standaard
+    uitsluitend op metadata (titel, type, medewerkernaam). Met search_content=True
+    wordt bij bestanden zonder metadata-match ook lokaal de documentinhoud
+    doorzocht (tekstextractie + platte string-matching, geen AI, niets gaat naar
+    een externe partij) - alleen voor bestandstypen in CONTENT_SEARCH_EXTENSIONS;
+    andere typen (.doc, .xls/.xlsx, afbeeldingen) worden overgeslagen. Gedeeld door
+    de /documents-pagina en de AI-zoekassistent (die zoekt altijd zonder
+    search_content, voor voorspelbare snelheid)."""
+    q = (q or "").strip().lower()
+    type_filter = (type_filter or "").strip()
+    employee_id = (employee_id or "").strip()
+
+    docs = []
+    for e in [normalize_employee(x) for x in load_employees()]:
+        if employee_id and e["id"] != employee_id:
+            continue
+        employee_name = f"{e.get('first_name','')} {e.get('last_name','')}".strip()
+        for d in e.get("documents", []):
+            if type_filter and d.get("type") != type_filter:
+                continue
+            if not q:
+                docs.append({**d, "employee_id": e["id"], "employee_name": employee_name, "matched_in": ""})
+                continue
+            haystack = " ".join([d.get("title", ""), d.get("type", ""), employee_name]).lower()
+            if q in haystack:
+                docs.append({**d, "employee_id": e["id"], "employee_name": employee_name, "matched_in": "metadata"})
+                continue
+            if search_content:
+                title = d.get("title", "")
+                ext = title.rsplit(".", 1)[-1].lower() if "." in title else ""
+                if ext in CONTENT_SEARCH_EXTENSIONS:
+                    raw = _read_document_bytes(e["id"], d)
+                    if raw is not None:
+                        text = _extract_document_text(raw, ext)
+                        if text and q in text.lower():
+                            docs.append({**d, "employee_id": e["id"], "employee_name": employee_name, "matched_in": "inhoud"})
+    docs.sort(key=lambda x: x.get("uploaded_at", ""), reverse=True)
+    return docs
+
+
 @app.route("/documents")
 @admin_required
 @module_required("documents")
 def documents():
-    docs = []
-    for e in [normalize_employee(x) for x in load_employees()]:
-        for d in e.get("documents", []):
-            docs.append({**d, "employee_id": e["id"],
-                         "employee_name": f"{e.get('first_name','')} {e.get('last_name','')}".strip()})
-    docs.sort(key=lambda x: x.get("uploaded_at",""), reverse=True)
-    return render_template("documents.html", documents=docs)
+    q = request.args.get("q", "")
+    type_filter = request.args.get("type", "")
+    search_content = request.args.get("content", "") == "1"
+    docs = _search_documents(q, type_filter, search_content=search_content)
+    return render_template(
+        "documents.html", documents=docs, q=q, type_filter=type_filter,
+        document_types=DOCUMENT_TYPES, search_content=search_content,
+        content_search_extensions=sorted(CONTENT_SEARCH_EXTENSIONS),
+    )
 
 @app.route("/leave", methods=["GET","POST"])
 @admin_required
@@ -3644,6 +3808,566 @@ def collect_action_items():
     return items
 
 
+# ---------- AI-samenvatting (proeffunctie) ----------
+#
+# Test-only integratie: vat de al-verzamelde actiepunten hierboven samen in
+# gewone taal. Stuurt UITSLUITEND gestructureerde, niet-gevoelige velden die
+# hierboven al zichtbaar zijn (titel, toelichting, bron, datum, urgentie) —
+# geen geheimen uit de Accounts & codes-kluis, geen documentinhoud. Alleen
+# actief met een expliciet ingestelde SCHITTER_AI_API_KEY (zie .env.example),
+# precies zoals SCHITTER_SESSION_SECRET/SCHITTER_SETUP_CODE al werken.
+# Ondersteunt Gemini (standaard) en OpenAI, instelbaar via SCHITTER_AI_PROVIDER.
+#
+# Beoordeel dit eerst lokaal met verzonnen testmedewerkers voordat dit ooit
+# bij echte praktijkgegevens in de buurt komt.
+
+def _ai_configured() -> bool:
+    return bool(os.environ.get("SCHITTER_AI_API_KEY", "").strip())
+
+
+def _call_openai(api_key: str, model: str, system_prompt: str, user_prompt: str) -> tuple[str | None, str | None]:
+    payload = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.4,
+        "max_tokens": 400,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        return body["choices"][0]["message"]["content"].strip(), None
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("error", {}).get("message", "")
+        except Exception:
+            detail = ""
+        return None, f"AI-aanroep (OpenAI) mislukt ({exc.code}). {detail}".strip()
+    except urllib.error.URLError as exc:
+        return None, f"Geen verbinding met de AI-dienst: {exc.reason}"
+    except Exception as exc:
+        return None, f"Onverwachte fout bij AI-samenvatting: {exc}"
+
+
+def _call_gemini(api_key: str, model: str, system_prompt: str, user_prompt: str) -> tuple[str | None, str | None]:
+    payload = json.dumps({
+        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 400},
+    }).encode("utf-8")
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{quote(model)}:generateContent"
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        candidates = body.get("candidates") or []
+        if not candidates:
+            block_reason = (body.get("promptFeedback") or {}).get("blockReason")
+            if block_reason:
+                return None, f"Gemini heeft het verzoek geblokkeerd ({block_reason})."
+            return None, "Gemini gaf geen antwoord terug."
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "".join(p.get("text", "") for p in parts).strip()
+        if not text:
+            return None, "Gemini gaf een leeg antwoord terug."
+        return text, None
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("error", {}).get("message", "")
+        except Exception:
+            detail = ""
+        return None, f"AI-aanroep (Gemini) mislukt ({exc.code}). {detail}".strip()
+    except urllib.error.URLError as exc:
+        return None, f"Geen verbinding met de AI-dienst: {exc.reason}"
+    except Exception as exc:
+        return None, f"Onverwachte fout bij AI-samenvatting: {exc}"
+
+
+def _dispatch_ai_call(api_key: str, system_prompt: str, user_prompt: str) -> tuple[str | None, str | None]:
+    """Kiest de AI-provider (SCHITTER_AI_PROVIDER, standaard 'gemini') en het bijbehorende
+    standaardmodel (SCHITTER_AI_MODEL overschrijft dit), en doet de daadwerkelijke aanroep.
+    Gedeeld door alle AI-proeffuncties in dit bestand."""
+    provider = (os.environ.get("SCHITTER_AI_PROVIDER", "gemini").strip().lower() or "gemini")
+    if provider not in ("gemini", "openai"):
+        return None, f"Onbekende SCHITTER_AI_PROVIDER '{provider}' (verwacht 'gemini' of 'openai')."
+    if provider == "openai":
+        model = os.environ.get("SCHITTER_AI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+        return _call_openai(api_key, model, system_prompt, user_prompt)
+    model = os.environ.get("SCHITTER_AI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+    return _call_gemini(api_key, model, system_prompt, user_prompt)
+
+
+def generate_ai_action_summary(items: list[dict]) -> tuple[str | None, str | None]:
+    """Laat een taalmodel de actiepuntenlijst samenvatten. Geeft (tekst, fout) terug,
+    naar analogie van send_email(): nooit een exception laten opborrelen naar de route."""
+    api_key = os.environ.get("SCHITTER_AI_API_KEY", "").strip()
+    if not api_key:
+        return None, "Stel SCHITTER_AI_API_KEY in (zie .env.example) om deze proeffunctie te gebruiken."
+
+    if not items:
+        return "Geen openstaande acties op dit moment. Niets om samen te vatten.", None
+
+    bron_labels = {
+        "contract": "Contract", "registration": "Registratie", "asset": "Bedrijfsmiddel",
+        "task": "Taak", "workflow": "Workflow",
+    }
+    regels = []
+    for item in items[:40]:
+        bron = bron_labels.get(item.get("source"), item.get("source", ""))
+        datum = f", datum: {item['due_date']}" if item.get("due_date") else ""
+        regels.append(f"- [{item.get('severity','info')}] {bron}: {item.get('title','')} — {item.get('detail','')}{datum}")
+    lijst_tekst = "\n".join(regels)
+    if len(items) > 40:
+        lijst_tekst += f"\n… en nog {len(items) - 40} andere actie(s)."
+
+    system_prompt = (
+        "Je schrijft een kort, zakelijk overzicht in het Nederlands voor de "
+        "praktijkhouder van een zorgorganisatie, op basis van een al samengestelde "
+        "lijst met openstaande acties uit een personeelsapp. Gebruik uitsluitend de "
+        "gegeven regels. Verzin nooit namen, aantallen, data of acties die niet in "
+        "de lijst staan. Groepeer logisch (bijvoorbeeld per soort), noem urgente "
+        "zaken ('danger') het eerst, en houd het compact: maximaal circa 120 "
+        "woorden, gewone lopende tekst zonder opsomming met streepjes."
+    )
+    user_prompt = f"Openstaande acties ({len(items)} totaal):\n{lijst_tekst}"
+    return _dispatch_ai_call(api_key, system_prompt, user_prompt)
+
+
+# ---------- AI-intake voor nieuwe medewerkers (proeffunctie) ----------
+#
+# Test-only integratie: laat een taalmodel vrije tekst (bijv. een intake-e-mail)
+# omzetten in een CONCEPT voor het bestaande aanmaakformulier van een medewerker,
+# plus eventuele registraties (zoals VOG) die in de tekst genoemd worden. Dit
+# slaat NOOIT rechtstreeks iets op - de beheerder komt op de bestaande, al
+# gevalideerde formulieren terecht en bevestigt zelf elk veld, precies zoals bij
+# handmatige invoer. Zo kan een extractiefout (verkeerde datum, verzonnen
+# nummer) nooit ongezien in een dossier belanden - dezelfde discipline die de
+# Excel-import in deze app al hanteert (hard weigeren/leeg laten in plaats van
+# gokken).
+#
+# Beoordeel dit eerst lokaal met verzonnen testmedewerkers voordat dit ooit bij
+# echte praktijkgegevens in de buurt komt.
+
+_EMPLOYEE_INTAKE_FIELDS = [
+    "first_name", "last_name", "email", "phone", "address", "postal_code",
+    "city", "birth_date", "emergency_name", "emergency_phone", "function", "notes",
+]
+
+
+def _clean_intake_date(value) -> str:
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    try:
+        date.fromisoformat(value)
+        return value
+    except ValueError:
+        return ""
+
+
+def _parse_ai_json(text: str):
+    """Haalt een JSON-object uit een AI-antwoord, ook als het in een ```json-codeblok zit."""
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+    return json.loads(cleaned)
+
+
+def extract_employee_intake(raw_text: str) -> tuple[dict | None, str | None]:
+    """Laat een taalmodel vrije tekst omzetten in een concept-medewerker + concept-
+    registraties. Geeft ({"employee": {...}, "registrations": [...]}, None) of
+    (None, foutmelding) terug - nooit een exception naar de route."""
+    api_key = os.environ.get("SCHITTER_AI_API_KEY", "").strip()
+    if not api_key:
+        return None, "Stel SCHITTER_AI_API_KEY in (zie .env.example) om deze proeffunctie te gebruiken."
+
+    raw_text = (raw_text or "").strip()
+    if not raw_text:
+        return None, "Plak eerst een tekst met de gegevens van de nieuwe medewerker."
+
+    system_prompt = (
+        "Je haalt gegevens voor een personeelsdossier uit vrije tekst (bijvoorbeeld een "
+        "intake-e-mail) en antwoordt UITSLUITEND met geldige JSON, zonder toelichting en "
+        "zonder markdown-codeblok. Gebruik exact deze vorm:\n"
+        '{"employee": {"first_name": "", "last_name": "", "email": "", "phone": "", '
+        '"address": "", "postal_code": "", "city": "", "birth_date": "", '
+        '"emergency_name": "", "emergency_phone": "", "function": "", "notes": ""}, '
+        '"registrations": [{"type": "", "number": "", "institution": "", '
+        '"obtained_at": "", "expires_at": "", "notes": ""}]}\n'
+        "Regels: vul een veld alleen in als het letterlijk of ondubbelzinnig in de tekst "
+        "staat; laat een veld leeg ('') als het niet genoemd wordt. Verzin NOOIT een "
+        "nummer, datum, naam of adres die niet in de tekst staat. Data altijd in "
+        "jjjj-mm-dd formaat, of leeg als de tekst geen exacte datum geeft. Neem in "
+        "'registrations' alleen items op die daadwerkelijk in de tekst genoemd worden "
+        "(bijvoorbeeld een VOG, SKJ-registratie, BIG-registratie, diploma of BHV-certificaat); "
+        "laat de lijst leeg als er niets dergelijks genoemd wordt. Gebruik voor 'type' een "
+        "korte, herkenbare naam zoals 'VOG', 'SKJ-registratie', 'BIG-registratie', 'Diploma' "
+        "of 'BHV' als dat past, anders een korte eigen omschrijving uit de tekst zelf."
+    )
+    text, err = _dispatch_ai_call(api_key, system_prompt, raw_text)
+    if err:
+        return None, err
+
+    try:
+        parsed = _parse_ai_json(text)
+    except (json.JSONDecodeError, ValueError):
+        return None, "AI-antwoord kon niet als JSON worden gelezen. Probeer het opnieuw of vul het formulier handmatig in."
+
+    if not isinstance(parsed, dict):
+        return None, "AI-antwoord had niet de verwachte vorm. Probeer het opnieuw of vul het formulier handmatig in."
+
+    raw_employee = parsed.get("employee")
+    if not isinstance(raw_employee, dict):
+        raw_employee = {}
+    employee = {}
+    for key in _EMPLOYEE_INTAKE_FIELDS:
+        value = str(raw_employee.get(key, "") or "").strip()
+        if key == "birth_date":
+            value = _clean_intake_date(value)
+        employee[key] = value
+
+    raw_regs = parsed.get("registrations")
+    if not isinstance(raw_regs, list):
+        raw_regs = []
+    registrations = []
+    for raw_reg in raw_regs[:10]:
+        if not isinstance(raw_reg, dict):
+            continue
+        reg_type = str(raw_reg.get("type", "") or "").strip()
+        if not reg_type:
+            continue
+        reg = {"sid": str(uuid.uuid4()), "type": reg_type}
+        for key in ("number", "institution", "notes"):
+            reg[key] = str(raw_reg.get(key, "") or "").strip()
+        for key in ("obtained_at", "expires_at"):
+            reg[key] = _clean_intake_date(raw_reg.get(key, ""))
+        registrations.append(reg)
+
+    return {"employee": employee, "registrations": registrations}, None
+
+
+_ASSET_INTAKE_FIELDS = [
+    "category", "name", "brand", "model", "serial_number", "asset_number", "imei",
+    "phone_number", "provider", "pin", "puk", "os", "purchase_date", "warranty_until",
+    "accessories", "notes",
+]
+
+
+def extract_asset_intake(raw_text: str) -> tuple[dict | None, str | None]:
+    """Laat een taalmodel vrije tekst omzetten in een concept-bedrijfsmiddel. Geeft
+    ({"asset": {...}}, None) of (None, foutmelding) terug - nooit een exception naar
+    de route. Vult nooit een assets-record rechtstreeks; het concept komt terecht in
+    het bestaande, al gevalideerde aanmaakformulier op de bedrijfsmiddelenpagina."""
+    api_key = os.environ.get("SCHITTER_AI_API_KEY", "").strip()
+    if not api_key:
+        return None, "Stel SCHITTER_AI_API_KEY in (zie .env.example) om deze proeffunctie te gebruiken."
+
+    raw_text = (raw_text or "").strip()
+    if not raw_text:
+        return None, "Plak eerst een tekst met de gegevens van het nieuwe bedrijfsmiddel."
+
+    system_prompt = (
+        "Je haalt gegevens voor een bedrijfsmiddel (hardware of ander inventarisitem) uit "
+        "vrije tekst (bijvoorbeeld een inkoopbon, pakbon of leverancierse-mail) en antwoordt "
+        "UITSLUITEND met geldige JSON, zonder toelichting en zonder markdown-codeblok. Gebruik "
+        "exact deze vorm:\n"
+        '{"asset": {"category": "", "name": "", "brand": "", "model": "", "serial_number": "", '
+        '"asset_number": "", "imei": "", "phone_number": "", "provider": "", "pin": "", '
+        '"puk": "", "os": "", "purchase_date": "", "warranty_until": "", "accessories": "", '
+        '"notes": ""}}\n'
+        "Regels: vul een veld alleen in als het letterlijk of ondubbelzinnig in de tekst staat; "
+        "laat een veld leeg ('') als het niet genoemd wordt. Verzin NOOIT een serienummer, "
+        "assetnummer, IMEI, datum of merk die niet in de tekst staat. Data altijd in "
+        "jjjj-mm-dd formaat, of leeg als de tekst geen exacte datum geeft. Gebruik voor "
+        "'category' een korte, herkenbare naam zoals 'Telefoon', 'Laptop', 'Tablet', 'Sleutel', "
+        "'Toegangspas', 'Token' of 'Monitor' als dat past, anders een korte eigen omschrijving "
+        "uit de tekst zelf, of 'Overig' als het type niet duidelijk is."
+    )
+    text, err = _dispatch_ai_call(api_key, system_prompt, raw_text)
+    if err:
+        return None, err
+
+    try:
+        parsed = _parse_ai_json(text)
+    except (json.JSONDecodeError, ValueError):
+        return None, "AI-antwoord kon niet als JSON worden gelezen. Probeer het opnieuw of vul het formulier handmatig in."
+
+    if not isinstance(parsed, dict):
+        return None, "AI-antwoord had niet de verwachte vorm. Probeer het opnieuw of vul het formulier handmatig in."
+
+    raw_asset = parsed.get("asset")
+    if not isinstance(raw_asset, dict):
+        raw_asset = {}
+    asset = {}
+    for key in _ASSET_INTAKE_FIELDS:
+        value = str(raw_asset.get(key, "") or "").strip()
+        if key in ("purchase_date", "warranty_until"):
+            value = _clean_intake_date(value)
+        asset[key] = value
+
+    return {"asset": asset}, None
+
+
+# ---------- AI-zoekassistent voor accounts & codes / documenten (proeffunctie) ----------
+#
+# Test-only integratie: het taalmodel ziet UITSLUITEND de vrije zoekvraag die
+# de gebruiker zelf typt - nooit medewerkergegevens, documentinhoud of
+# geheimen (wachtwoorden/PIN's/etc. blijven volledig buiten beeld). Het model
+# bepaalt alleen WAAR gezocht moet worden (accounts, documenten, of allebei)
+# en met welk kernbegrip. De daadwerkelijke zoekactie gebeurt daarna gewoon
+# lokaal in Python, via dezelfde metadata-filters als de bestaande zoekvelden
+# op /credentials en /documents. Een gevonden account wordt getoond als de
+# gewone, al bestaande tegel - de gebruiker onthult het geheim zelf via de
+# bestaande "Tonen"-knop, precies zoals altijd.
+
+def extract_search_intent(query: str) -> tuple[dict | None, str | None]:
+    """Laat een taalmodel een korte zoekvraag omzetten in een zoekdoel
+    ('credentials', 'documents' of 'both') plus een kort trefwoord. Geeft
+    ({"target": ..., "search_term": ...}, None) of (None, foutmelding)
+    terug - nooit een exception naar de route."""
+    api_key = os.environ.get("SCHITTER_AI_API_KEY", "").strip()
+    if not api_key:
+        return None, "Stel SCHITTER_AI_API_KEY in (zie .env.example) om deze proeffunctie te gebruiken."
+
+    query = (query or "").strip()
+    if not query:
+        return None, "Typ eerst een zoekvraag."
+
+    system_prompt = (
+        "Je helpt een zoekvraag in een Nederlandstalig personeelssysteem omzetten in een "
+        "zoekopdracht. Het systeem heeft twee doorzoekbare registers: 'credentials' (accounts, "
+        "wachtwoorden, PIN's, technische sleutels - gekoppeld aan een dienst/systeem en eventueel "
+        "een medewerker) en 'documents' (documenten in personeelsdossiers, zoals VOG, diploma, "
+        "arbeidsovereenkomst - gekoppeld aan een medewerker). Antwoord UITSLUITEND met geldige "
+        "JSON, zonder toelichting en zonder markdown-codeblok, in exact deze vorm: "
+        '{"target": "credentials", "search_term": ""}\n'
+        "Kies voor 'target' de waarde 'credentials' als de vraag gaat over een account, "
+        "wachtwoord, inlog, PIN, code of sleutel; 'documents' als de vraag gaat over een "
+        "document, bestand, diploma, VOG, contract of overeenkomst; 'both' als het onduidelijk is "
+        "of als beide relevant kunnen zijn. Zet in 'search_term' alleen het kernbegrip waarop "
+        "gezocht moet worden (bijvoorbeeld de naam van een medewerker, dienst of documenttype) - "
+        "laat woorden als 'wachtwoord van' of 'document van' weg als de rest van de vraag al "
+        "aangeeft waar gezocht moet worden. Verzin nooit namen die niet in de vraag zelf staan."
+    )
+    text, err = _dispatch_ai_call(api_key, system_prompt, query)
+    if err:
+        return None, err
+
+    try:
+        parsed = _parse_ai_json(text)
+    except (json.JSONDecodeError, ValueError):
+        return None, "AI-antwoord kon niet als JSON worden gelezen. Probeer het opnieuw of zoek direct op de accounts- of documentenpagina."
+
+    if not isinstance(parsed, dict):
+        return None, "AI-antwoord had niet de verwachte vorm. Probeer het opnieuw of zoek direct op de accounts- of documentenpagina."
+
+    target = str(parsed.get("target", "") or "").strip().lower()
+    if target not in ("credentials", "documents", "both"):
+        target = "both"
+    search_term = str(parsed.get("search_term", "") or "").strip()[:100]
+
+    return {"target": target, "search_term": search_term}, None
+
+
+def extract_assistant_intent(prompt: str) -> tuple[dict | None, str | None]:
+    """Laat een taalmodel een vrije tekstopdracht voor de centrale AI-assistent
+    classificeren in een van de bestaande proeffuncties. Geeft nooit meer terug dan
+    WELKE bestaande functie waarschijnlijk bedoeld wordt (plus, voor zoeken, hetzelfde
+    zoekdoel/trefwoord als extract_search_intent) - de daadwerkelijke uitvoering
+    gebeurt altijd via de bestaande, al geteste routes/formulieren."""
+    api_key = os.environ.get("SCHITTER_AI_API_KEY", "").strip()
+    if not api_key:
+        return None, "Stel SCHITTER_AI_API_KEY in (zie .env.example) om deze proeffunctie te gebruiken."
+
+    prompt = (prompt or "").strip()
+    if not prompt:
+        return None, "Typ eerst een opdracht of vraag."
+
+    system_prompt = (
+        "Je bepaalt welke van een vaste set functies in een Nederlandstalig personeelssysteem "
+        "een gebruiker bedoelt met zijn getypte opdracht. Er zijn precies vijf mogelijke "
+        "capabilities: 'search' (iets opzoeken: een account, wachtwoord, inlog, code of sleutel "
+        "in het register 'credentials', of een document zoals VOG, diploma, arbeidsovereenkomst "
+        "in het register 'documents'), 'employee_intake' (een NIEUWE medewerker aanmaken/invoeren "
+        "op basis van geplakte tekst zoals een intake-e-mail met naam, adres, functiegegevens), "
+        "'asset_intake' (een NIEUW bedrijfsmiddel aanmaken/invoeren op basis van geplakte "
+        "tekst zoals een inkoopbon, pakbon of leverancierse-mail met merk, model, serienummer "
+        "of assetnummer), "
+        "'actions_summary' (een samenvatting van de openstaande acties/signaleringen in het "
+        "Actiecentrum), of 'unclear' als geen van deze duidelijk van toepassing is. Antwoord "
+        "UITSLUITEND met geldige JSON, zonder toelichting en zonder markdown-codeblok, in exact "
+        "deze vorm: "
+        '{"capability": "search", "search_target": "credentials", "search_term": ""}\n'
+        "Vul 'search_target' en 'search_term' alleen zinvol in als capability 'search' is: "
+        "'search_target' is 'credentials', 'documents' of 'both' (zoals hierboven beschreven, "
+        "'both' als onduidelijk of allebei relevant kunnen zijn); 'search_term' is het kernbegrip "
+        "om op te zoeken (bijvoorbeeld een naam), zonder woorden als 'wachtwoord van'. Voor de "
+        "andere capabilities mag 'search_target' 'both' en 'search_term' leeg zijn. Verzin nooit "
+        "namen die niet in de opdracht zelf staan."
+    )
+    text, err = _dispatch_ai_call(api_key, system_prompt, prompt)
+    if err:
+        return None, err
+
+    try:
+        parsed = _parse_ai_json(text)
+    except (json.JSONDecodeError, ValueError):
+        return None, "AI-antwoord kon niet als JSON worden gelezen. Probeer het anders te formuleren."
+
+    if not isinstance(parsed, dict):
+        return None, "AI-antwoord had niet de verwachte vorm. Probeer het anders te formuleren."
+
+    capability = str(parsed.get("capability", "") or "").strip().lower()
+    if capability not in ("search", "employee_intake", "actions_summary", "asset_intake"):
+        capability = "unclear"
+    search_target = str(parsed.get("search_target", "") or "").strip().lower()
+    if search_target not in ("credentials", "documents", "both"):
+        search_target = "both"
+    search_term = str(parsed.get("search_term", "") or "").strip()[:100]
+
+    return {"capability": capability, "search_target": search_target, "search_term": search_term}, None
+
+
+@app.route("/assistant", methods=["GET", "POST"])
+@admin_required
+def ai_assistant():
+    """Een centrale plek voor de AI-proeffuncties: de gebruiker typt in gewone taal
+    wat hij wil, en de opdracht wordt herkend en doorgestuurd naar de bijbehorende
+    bestaande, al geteste functie of pagina. Voert zelf nooit iets uit dat niet ook
+    al los bestond, en slaat nooit rechtstreeks iets op."""
+    if request.method == "POST":
+        prompt = request.form.get("prompt", "").strip()
+        intent, err = extract_assistant_intent(prompt)
+        if err:
+            flash(err, "error")
+            return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
+
+        capability = intent["capability"]
+        log_action("ai_assistant_routed", detail=f"{capability}: {prompt[:80]}")
+
+        if capability == "search":
+            creds_enabled = module_enabled("credentials")
+            docs_enabled = module_enabled("documents")
+            if not creds_enabled and not docs_enabled:
+                flash("De modules Accounts & codes en Documenten staan allebei uit.", "error")
+                return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
+            available = []
+            if creds_enabled:
+                available.append("credentials")
+            if docs_enabled:
+                available.append("documents")
+            target = intent["search_target"] if intent["search_target"] in available else ("both" if len(available) > 1 else available[0])
+            term = intent["search_term"]
+            if target == "credentials":
+                return redirect(url_for("credentials", q=term))
+            if target == "documents":
+                return redirect(url_for("documents", q=term))
+            cred_count = len(_search_credentials(term)[0])
+            doc_count = len(_search_documents(term))
+            return render_template("ai_search_both.html", query=prompt, search_term=term,
+                                   cred_count=cred_count, doc_count=doc_count)
+
+        if capability == "employee_intake":
+            return redirect(url_for("employee_ai_intake", raw_text=prompt))
+
+        if capability == "asset_intake":
+            if not module_enabled("assets"):
+                flash("De module Bedrijfsmiddelen staat uit.", "error")
+                return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
+            return redirect(url_for("asset_ai_intake", raw_text=prompt))
+
+        if capability == "actions_summary":
+            if not module_enabled("signals"):
+                flash("De module Actiecentrum staat uit.", "error")
+                return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
+            items = collect_action_items()
+            summary, summary_err = generate_ai_action_summary(items)
+            if summary_err:
+                session["_ai_action_summary_error"] = summary_err
+            else:
+                session["_ai_action_summary"] = summary
+                session["_ai_action_summary_at"] = datetime.now().strftime("%d-%m-%Y %H:%M")
+                log_action("ai_summary_generated", detail=f"{len(items)} acties samengevat (proef, via AI-assistent)")
+            return redirect(url_for("action_center"))
+
+        flash(
+            "Niet duidelijk wat je bedoelt. Probeer het anders te formuleren, bijvoorbeeld: "
+            "\u2018wachtwoord van Jan\u2019, \u2018nieuwe medewerker: (geplakte tekst)\u2019, "
+            "\u2018nieuw bedrijfsmiddel: (geplakte tekst)\u2019, "
+            "of \u2018samenvatting van het actiecentrum\u2019.",
+            "error",
+        )
+        return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
+
+    return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt="")
+
+
+@app.route("/search/ai", methods=["GET", "POST"])
+@admin_required
+def ai_search():
+    if request.method == "POST":
+        query = request.form.get("query", "").strip()
+        intent, err = extract_search_intent(query)
+        if err:
+            flash(err, "error")
+            return render_template("ai_search.html", ai_configured=_ai_configured(), query=query)
+
+        log_action("ai_search_interpreted", detail=f"{intent['target']}: {intent['search_term'] or query}")
+        target = intent["target"]
+        term = intent["search_term"]
+
+        creds_enabled = module_enabled("credentials")
+        docs_enabled = module_enabled("documents")
+        if not creds_enabled and not docs_enabled:
+            flash("De modules Accounts & codes en Documenten staan allebei uit.", "error")
+            return render_template("ai_search.html", ai_configured=_ai_configured(), query=query)
+
+        available = []
+        if creds_enabled:
+            available.append("credentials")
+        if docs_enabled:
+            available.append("documents")
+        effective_target = target if target in available else ("both" if len(available) > 1 else available[0])
+
+        if effective_target == "credentials":
+            return redirect(url_for("credentials", q=term))
+        if effective_target == "documents":
+            return redirect(url_for("documents", q=term))
+
+        cred_count = len(_search_credentials(term)[0])
+        doc_count = len(_search_documents(term))
+        return render_template(
+            "ai_search_both.html", query=query, search_term=term,
+            cred_count=cred_count, doc_count=doc_count,
+        )
+
+    return render_template("ai_search.html", ai_configured=_ai_configured(), query="")
+
+
 @app.route("/actions")
 @admin_required
 @module_required("signals")
@@ -3657,9 +4381,31 @@ def action_center():
     }
     onboarding_workflows = load_module("onboarding")
     offboarding_workflows = load_module("offboarding")
+    ai_summary = session.pop("_ai_action_summary", None)
+    ai_summary_error = session.pop("_ai_action_summary_error", None)
+    ai_summary_at = session.pop("_ai_action_summary_at", None)
     return render_template("actions.html", items=items, counts=counts,
                            onboarding_workflows=onboarding_workflows,
-                           offboarding_workflows=offboarding_workflows)
+                           offboarding_workflows=offboarding_workflows,
+                           ai_configured=_ai_configured(),
+                           ai_summary=ai_summary,
+                           ai_summary_error=ai_summary_error,
+                           ai_summary_at=ai_summary_at)
+
+
+@app.route("/actions/ai-summary", methods=["POST"])
+@admin_required
+@module_required("signals")
+def action_center_ai_summary():
+    items = collect_action_items()
+    summary, error = generate_ai_action_summary(items)
+    if error:
+        session["_ai_action_summary_error"] = error
+    else:
+        session["_ai_action_summary"] = summary
+        session["_ai_action_summary_at"] = datetime.now().strftime("%d-%m-%Y %H:%M")
+        log_action("ai_summary_generated", detail=f"{len(items)} acties samengevat (proef)")
+    return redirect(url_for("action_center"))
 
 
 @app.route("/dashboard")
@@ -3914,10 +4660,39 @@ def employee_new():
             detail=f"{employee['first_name']} {employee['last_name']}",
             target=employee["id"],
         )
+        pending_regs = session.get("_ai_intake_registrations")
+        if pending_regs:
+            session["_ai_intake_registrations_for"] = employee["id"]
+            flash("Medewerker toegevoegd. Controleer hieronder de door AI voorgestelde registraties.", "success")
+            return redirect(url_for("employee_detail", employee_id=employee["id"], tab="registrations"))
         flash("Medewerker toegevoegd.", "success")
         return redirect(url_for("employee_detail", employee_id=employee["id"]))
 
-    return render_template("employee_form.html", employee=None, is_new=True, settings=load_settings())
+    ai_intake = session.pop("_ai_intake_employee", None)
+    ai_prefilled = bool(ai_intake)
+    prefill_employee = normalize_employee(dict(ai_intake)) if ai_intake else None
+    return render_template("employee_form.html", employee=prefill_employee, is_new=True,
+                           settings=load_settings(), ai_prefilled=ai_prefilled)
+
+
+@app.route("/employees/ai-intake", methods=["GET", "POST"])
+@admin_required
+def employee_ai_intake():
+    if request.method == "POST":
+        raw_text = request.form.get("raw_text", "").strip()
+        data, err = extract_employee_intake(raw_text)
+        if err:
+            flash(err, "error")
+            return render_template("employee_ai_intake.html", ai_configured=_ai_configured(), raw_text=raw_text)
+
+        session["_ai_intake_employee"] = data["employee"]
+        session["_ai_intake_registrations"] = data["registrations"] if module_enabled("registrations") else []
+        session.pop("_ai_intake_registrations_for", None)
+        log_action("ai_intake_extracted", detail=f"{len(data['registrations'])} registratie(s) voorgesteld (proef)")
+        flash("Concept gemaakt. Controleer elk veld voordat je opslaat.", "success")
+        return redirect(url_for("employee_new"))
+
+    return render_template("employee_ai_intake.html", ai_configured=_ai_configured(), raw_text=request.args.get("raw_text", ""))
 
 
 @app.route("/employees/<employee_id>")
@@ -3956,6 +4731,10 @@ def employee_detail(employee_id):
             if r.get("employee_id") == employee_id
         ]
 
+    ai_pending_registrations = []
+    if session.get("_ai_intake_registrations_for") == employee_id:
+        ai_pending_registrations = session.get("_ai_intake_registrations", [])
+
     return render_template(
         "employee_detail.html",
         employee=employee,
@@ -3963,8 +4742,21 @@ def employee_detail(employee_id):
         active_tab=tab,
         employee_credentials=employee_credentials,
         employee_assets=employee_assets,
-        employee_registrations=employee_registrations
+        employee_registrations=employee_registrations,
+        ai_pending_registrations=ai_pending_registrations
     )
+
+
+@app.route("/employees/<employee_id>/ai-intake-registrations/<sid>/dismiss", methods=["POST"])
+@admin_required
+def ai_intake_registration_dismiss(employee_id, sid):
+    if session.get("_ai_intake_registrations_for") == employee_id:
+        remaining = [r for r in session.get("_ai_intake_registrations", []) if r.get("sid") != sid]
+        session["_ai_intake_registrations"] = remaining
+        if not remaining:
+            session.pop("_ai_intake_registrations_for", None)
+            session.pop("_ai_intake_registrations", None)
+    return redirect(url_for("employee_detail", employee_id=employee_id, tab="registrations"))
 
 
 @app.route("/employees/<employee_id>/edit", methods=["GET", "POST"])
