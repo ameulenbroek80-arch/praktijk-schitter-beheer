@@ -112,7 +112,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.7.2"
+APP_VERSION = "2.8.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -993,7 +993,7 @@ def normalize_employee(employee: dict) -> dict:
         "address": "", "postal_code": "", "city": "", "birth_date": "",
         "emergency_name": "", "emergency_phone": "",
         "start_date": "", "contract_end": "", "hours": "", "status": "In dienst",
-        "employment_type": "", "salary_scale": "", "work_email": "",
+        "employment_type": "", "salary_scale": "", "work_email": "", "work_phone": "",
         "work_location": "", "manager": "", "notes": "",
         "documents": [], "assets": [], "registrations": [], "custom_fields": {},
         "annual_leave_hours": "0", "carryover_leave_hours": "0",
@@ -5355,14 +5355,14 @@ def employees_export():
     writer = csv.writer(buffer, delimiter=";")
     writer.writerow([
         "Voornaam", "Achternaam", "Functie", "Privé e-mail", "Zakelijk e-mail", "Telefoon",
-        "Startdatum", "Einddatum contract", "Uren per week", "Type dienstverband", "Status",
-        "Werklocatie", "Leidinggevende"
+        "Zakelijk telefoon", "Startdatum", "Einddatum contract", "Uren per week",
+        "Type dienstverband", "Status", "Werklocatie", "Leidinggevende"
     ])
     for e in items:
         writer.writerow([
             e["first_name"], e["last_name"], e["function"], e["email"], e["work_email"],
-            e["phone"], e["start_date"], e["contract_end"], e["hours"], e["employment_type"],
-            e["status"], e["work_location"], e["manager"]
+            e["phone"], e["work_phone"], e["start_date"], e["contract_end"], e["hours"],
+            e["employment_type"], e["status"], e["work_location"], e["manager"]
         ])
     log_action("employees_exported")
     csv_bytes = buffer.getvalue().encode("utf-8-sig")
@@ -5395,7 +5395,7 @@ def employee_from_form(existing=None):
     if module_enabled("hr_employment"):
         hr_fields = [
             "start_date", "contract_end", "hours", "status",
-            "employment_type", "salary_scale", "work_email", "manager",
+            "employment_type", "salary_scale", "work_email", "work_phone", "manager",
         ]
         for field in hr_fields:
             e[field] = request.form.get(field, "").strip()

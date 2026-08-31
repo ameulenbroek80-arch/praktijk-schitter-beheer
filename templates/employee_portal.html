@@ -23,6 +23,7 @@
       <div><dt>Functie</dt><dd>{{ employee.function or '—' }}</dd></div>
       <div><dt>Status</dt><dd>{{ employee.status or '—' }}</dd></div>
       <div><dt>Zakelijk e-mail</dt><dd>{{ employee.work_email or '—' }}</dd></div>
+      <div><dt>Zakelijk telefoon</dt><dd>{{ employee.work_phone or '—' }}</dd></div>
       <div><dt>Locatie</dt><dd>{{ employee.work_location or '—' }}</dd></div>
       {% if module_enabled('hr_employment') %}
       <div><dt>Soort dienstverband</dt><dd>{{ employee.employment_type or '—' }}</dd></div>

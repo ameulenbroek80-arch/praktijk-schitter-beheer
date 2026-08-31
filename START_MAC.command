@@ -1,7 +1,7 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 
-EXPECTED_VERSION="2.7.2"
+EXPECTED_VERSION="2.8.0"
 LOOPBACK="127.0.0.1"
 
 if [ ! -d ".venv" ]; then

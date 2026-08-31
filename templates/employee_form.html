@@ -55,6 +55,9 @@
     <label>Zakelijk e-mailadres
       <input type="email" name="work_email" value="{{ employee.work_email if employee else '' }}">
     </label>
+    <label>Zakelijk telefoonnummer
+      <input type="tel" name="work_phone" value="{{ employee.work_phone if employee else '' }}">
+    </label>
     <label>Datum in dienst
       <input type="date" name="start_date" value="{{ employee.start_date if employee else '' }}">
     </label>

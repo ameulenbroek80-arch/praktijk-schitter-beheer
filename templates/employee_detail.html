@@ -64,6 +64,7 @@
     <dl class="details-list">
       <div><dt>Privé e-mail</dt><dd>{{ employee.email or '—' }}</dd></div>
       <div><dt>Zakelijk e-mail</dt><dd>{{ employee.work_email or '—' }}</dd></div>
+      <div><dt>Zakelijk telefoon</dt><dd>{{ employee.work_phone or '—' }}</dd></div>
       <div><dt>Telefoon</dt><dd>{{ employee.phone or '—' }}</dd></div>
       {% if module_enabled('hr_employment') %}
       <div><dt>Datum in dienst</dt><dd>{{ employee.start_date or '—' }}</dd></div>
@@ -108,6 +109,7 @@
   <dl class="details-list wide">
     <div><dt>Functie</dt><dd>{{ employee.function or '—' }}</dd></div>
     <div><dt>Zakelijk e-mailadres</dt><dd>{{ employee.work_email or '—' }}</dd></div>
+    <div><dt>Zakelijk telefoonnummer</dt><dd>{{ employee.work_phone or '—' }}</dd></div>
     <div><dt>Datum in dienst</dt><dd>{{ employee.start_date or '—' }}</dd></div>
     <div><dt>Einddatum contract</dt><dd>{{ employee.contract_end or '—' }}</dd></div>
     <div><dt>Type dienstverband</dt><dd>{{ employee.employment_type or '—' }}</dd></div>

@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-set "EXPECTED_VERSION=2.7.2"
+set "EXPECTED_VERSION=2.8.0"
 set "LOOPBACK=127.0.0.1"
 
 if not exist ".venv\Scripts\python.exe" (
