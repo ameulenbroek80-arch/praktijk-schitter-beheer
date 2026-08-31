@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import sortable_th %}
 {% block title %}Medewerkers · Praktijk Schitter{% endblock %}
 {% block page_title %}Medewerkers{% endblock %}
 {% block page_subtitle %}Beheer de personeelsdossiers van de praktijk.{% endblock %}
@@ -19,7 +20,14 @@
   {% if employees %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Naam</th><th>Functie</th><th>E-mail</th><th>Startdatum</th><th>Status</th><th></th></tr></thead>
+      <thead><tr>
+        {{ sortable_th('Naam', 'name', 'employees', sort, dir, {'q': q}) }}
+        {{ sortable_th('Functie', 'function', 'employees', sort, dir, {'q': q}) }}
+        <th>E-mail</th>
+        {{ sortable_th('Startdatum', 'start_date', 'employees', sort, dir, {'q': q}) }}
+        {{ sortable_th('Status', 'status', 'employees', sort, dir, {'q': q}) }}
+        <th></th>
+      </tr></thead>
       <tbody>
       {% for e in employees %}
       <tr>

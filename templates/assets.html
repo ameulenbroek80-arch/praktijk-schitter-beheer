@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import choice_field %}
+{% from "_macros.html" import choice_field, sortable_th %}
 {% block title %}Bedrijfsmiddelen · {{ app_name }}{% endblock %}
 {% block page_title %}Bedrijfsmiddelen{% endblock %}
 {% block page_subtitle %}Centrale inventaris van hardware en overige middelen.{% endblock %}
@@ -31,7 +31,14 @@
   {% if assets %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Status</th><th>Type</th><th>Middel</th><th>Asset / serie</th><th>Toegewezen aan</th><th></th></tr></thead>
+      <thead><tr>
+        {{ sortable_th('Status', 'status', 'assets_overview', sort, dir, {'q': q, 'status': status_filter, 'category': category_filter}) }}
+        {{ sortable_th('Type', 'category', 'assets_overview', sort, dir, {'q': q, 'status': status_filter, 'category': category_filter}) }}
+        {{ sortable_th('Middel', 'name', 'assets_overview', sort, dir, {'q': q, 'status': status_filter, 'category': category_filter}) }}
+        <th>Asset / serie</th>
+        {{ sortable_th('Toegewezen aan', 'employee', 'assets_overview', sort, dir, {'q': q, 'status': status_filter, 'category': category_filter}) }}
+        <th></th>
+      </tr></thead>
       <tbody>
       {% for a in assets %}
       <tr>

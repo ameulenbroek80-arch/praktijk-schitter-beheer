@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import choice_field %}
+{% from "_macros.html" import choice_field, sortable_th %}
 {% block title %}Registraties · {{ app_name }}{% endblock %}
 {% block page_title %}Registraties{% endblock %}
 {% block page_subtitle %}Centrale bewaking van registraties, certificaten en verloopdata.{% endblock %}
@@ -27,7 +27,15 @@
   {% if registrations %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Status</th><th>Medewerker</th><th>Registratie</th><th>Nummer</th><th>Geldig tot</th><th>Signalering</th><th></th></tr></thead>
+      <thead><tr>
+        {{ sortable_th('Status', 'status', 'registrations_overview', sort, dir, {'q': q, 'status': status_filter}) }}
+        {{ sortable_th('Medewerker', 'employee', 'registrations_overview', sort, dir, {'q': q, 'status': status_filter}) }}
+        {{ sortable_th('Registratie', 'type', 'registrations_overview', sort, dir, {'q': q, 'status': status_filter}) }}
+        <th>Nummer</th>
+        {{ sortable_th('Geldig tot', 'expires_at', 'registrations_overview', sort, dir, {'q': q, 'status': status_filter}) }}
+        <th>Signalering</th>
+        <th></th>
+      </tr></thead>
       <tbody>
       {% for r in registrations %}
       <tr>

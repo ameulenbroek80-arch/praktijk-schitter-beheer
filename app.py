@@ -112,7 +112,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.5.0"
+APP_VERSION = "2.6.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -1937,6 +1937,20 @@ def _apply_employee_excel_plan(plan: dict) -> dict:
 
 
 
+def _apply_sort(rows, sort_key, direction, field_map):
+    """Sorteert rows op een kolom uit field_map, als sort_key daar (nog) in voorkomt.
+    Bij een onbekende of ontbrekende sort_key wordt niets gesorteerd en de bestaande
+    volgorde van de aanroeper gewoon behouden - nooit een crash of gegokt gedrag op
+    een onbekende of gemanipuleerde queryparameter. Geeft (gesorteerde rows,
+    daadwerkelijk gebruikte sort_key, daadwerkelijk gebruikte richting) terug, zodat
+    de template exact weet welke kolomkop actief is."""
+    if sort_key not in field_map:
+        return rows, "", ""
+    direction = "desc" if direction == "desc" else "asc"
+    sorted_rows = sorted(rows, key=field_map[sort_key], reverse=(direction == "desc"))
+    return sorted_rows, sort_key, direction
+
+
 def _search_assets(q: str = ""):
     """Filtert bedrijfsmiddelen op trefwoord (naam/merk/model/serienummer/medewerker/...) -
     gedeeld door de /assets-pagina en de AI-zoekassistent."""
@@ -1956,6 +1970,14 @@ def _search_assets(q: str = ""):
             continue
         rows.append(row)
     return rows
+
+
+_ASSET_SORT_FIELDS = {
+    "status": lambda a: (a.get("status") or "").lower(),
+    "category": lambda a: (a.get("category") or "").lower(),
+    "name": lambda a: (a.get("name") or "").lower(),
+    "employee": lambda a: (a.get("employee_name") or "").lower(),
+}
 
 
 @app.route("/assets")
@@ -1980,6 +2002,9 @@ def assets_overview():
         and (not category_filter or row.get("category") == category_filter)
     ]
     rows.sort(key=lambda a:(a.get("status",""), a.get("category","").lower(), a.get("name","").lower()))
+    sort_key = request.args.get("sort", "")
+    sort_dir = request.args.get("dir", "asc")
+    rows, sort_key, sort_dir = _apply_sort(rows, sort_key, sort_dir, _ASSET_SORT_FIELDS)
     categories = sorted({a.get("category","Overig") for a in assets if a.get("category")})
     stats = {
         "total": len(assets),
@@ -1991,7 +2016,7 @@ def assets_overview():
                            statuses=ASSET_STATUSES, stats=stats, q=q,
                            status_filter=status_filter, category_filter=category_filter,
                            settings=load_settings(), ai_intake_asset=ai_intake_asset,
-                           ai_prefilled=ai_prefilled)
+                           ai_prefilled=ai_prefilled, sort=sort_key, dir=sort_dir)
 
 
 @app.route("/assets/add", methods=["POST"])
@@ -2280,6 +2305,14 @@ def _search_registrations(q: str = ""):
     return rows
 
 
+_REGISTRATION_SORT_FIELDS = {
+    "status": lambda r: (r.get("display_status") or "").lower(),
+    "employee": lambda r: (r.get("employee_name") or "").lower(),
+    "type": lambda r: (r.get("type") or "").lower(),
+    "expires_at": lambda r: r.get("expires_at") or "9999-12-31",
+}
+
+
 @app.route("/registrations")
 @admin_required
 @module_required("registrations")
@@ -2294,6 +2327,9 @@ def registrations_overview():
         if not status_filter or row.get("display_status") == status_filter
     ]
     rows.sort(key=lambda r:(r.get("expires_at") or "9999-12-31", r.get("employee_name","").lower()))
+    sort_key = request.args.get("sort", "")
+    sort_dir = request.args.get("dir", "asc")
+    rows, sort_key, sort_dir = _apply_sort(rows, sort_key, sort_dir, _REGISTRATION_SORT_FIELDS)
     stats = {
         "total": len(regs),
         "expiring": sum(1 for r in rows if r.get("display_status") == "Loopt af"),
@@ -2302,7 +2338,7 @@ def registrations_overview():
     }
     return render_template("registrations.html", registrations=rows, employees=employees,
                            stats=stats, q=q, status_filter=status_filter,
-                           settings=load_settings())
+                           settings=load_settings(), sort=sort_key, dir=sort_dir)
 
 
 @app.route("/registrations/add", methods=["POST"])
@@ -5238,12 +5274,23 @@ def _search_employees(q: str = ""):
     return items
 
 
+_EMPLOYEE_SORT_FIELDS = {
+    "name": lambda e: ((e.get("last_name") or "").lower(), (e.get("first_name") or "").lower()),
+    "function": lambda e: (e.get("function") or "").lower(),
+    "start_date": lambda e: e.get("start_date") or "",
+    "status": lambda e: (e.get("status") or "").lower(),
+}
+
+
 @app.route("/employees")
 @admin_required
 def employees():
     q = request.args.get("q", "").strip().lower()
     items = _search_employees(q)
-    return render_template("employees.html", employees=items, q=q)
+    sort_key = request.args.get("sort", "")
+    sort_dir = request.args.get("dir", "asc")
+    items, sort_key, sort_dir = _apply_sort(items, sort_key, sort_dir, _EMPLOYEE_SORT_FIELDS)
+    return render_template("employees.html", employees=items, q=q, sort=sort_key, dir=sort_dir)
 
 
 @app.route("/employees/export.csv")

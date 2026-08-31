@@ -11,3 +11,10 @@
          value="{{ current_value if current_value and current_value not in options else '' }}">
 </label>
 {% endmacro %}
+
+{% macro sortable_th(label, key, endpoint, current_sort, current_dir, extra_args={}) %}
+{% set next_dir = 'desc' if (current_sort == key and current_dir == 'asc') else 'asc' %}
+{% set link_args = dict(extra_args) %}
+{% set _unused = link_args.update({'sort': key, 'dir': next_dir}) %}
+<th><a class="sortable-th{{ ' sort-active' if current_sort == key else '' }}" href="{{ url_for(endpoint, **link_args) }}">{{ label }}{% if current_sort == key %}<span class="sort-arrow">{{ '\u25b2' if current_dir == 'asc' else '\u25bc' }}</span>{% endif %}</a></th>
+{% endmacro %}
