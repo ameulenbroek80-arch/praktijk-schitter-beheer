@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import csv
 import hashlib
 import html as html_lib
@@ -12,6 +13,7 @@ import secrets
 import shutil
 import smtplib
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -25,6 +27,8 @@ import urllib.error
 import urllib.request
 
 from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from flask import (
     Flask, Response, abort, flash, jsonify, redirect, render_template,
     request, session, url_for
@@ -64,6 +68,15 @@ IMPORT_STAGE_PREFIX = "excel_import_stage_"
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
 
+# Tijdelijke, versleutelde opslag voor AI-intakegegevens (ingetypte tekst en
+# door AI voorgestelde velden). Vervangt het doorgeven van deze gegevens via
+# de URL of de sessiecookie: er komt alleen een willekeurig token in de
+# sessie/URL terecht, de gegevens zelf staan hier, versleuteld, en verlopen
+# vanzelf (zie _ai_intake_cleanup).
+AI_INTAKE_DIR = STORAGE_DIR / "ai_intake_tmp"
+AI_INTAKE_DIR.mkdir(parents=True, exist_ok=True)
+AI_INTAKE_TTL_SECONDS = 3600
+
 # Wanneer de app zonder consolevenster wordt gestart (via pythonw.exe, zodat er
 # geen storend zwart schermpje verschijnt) zijn sys.stdout/sys.stderr None.
 # Zonder deze omleiding zou elke print() of onverwachte foutmelding de app
@@ -99,7 +112,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.3.1"
+APP_VERSION = "2.4.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -166,6 +179,80 @@ def _save_encrypted(path: Path, data) -> None:
     temp = path.with_suffix(path.suffix + ".tmp")
     temp.write_bytes(encrypted)
     temp.replace(path)
+
+
+# ---------- Tijdelijke AI-intake-opslag ----------
+#
+# raw_text (ingetypte tekst) en door AI voorgestelde velden bevatten mogelijk
+# herleidbare persoonsgegevens. Die horen niet thuis in de URL (browsergeschiedenis,
+# serverlogs) en niet in de sessiecookie (ondertekend, maar niet versleuteld).
+# Daarom staan ze hier kort versleuteld op de server, met alleen een willekeurig
+# token in de URL/sessie als verwijzing.
+
+def _ai_intake_path(token: str) -> Path:
+    return AI_INTAKE_DIR / f"{token}.enc"
+
+
+def _ai_intake_cleanup() -> None:
+    """Ruimt verlopen tijdelijke AI-intakebestanden op (best effort)."""
+    cutoff = time.time() - AI_INTAKE_TTL_SECONDS
+    try:
+        for path in AI_INTAKE_DIR.glob("*.enc"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+def _ai_intake_store(payload: dict) -> str:
+    """Slaat tijdelijke AI-intakegegevens versleuteld op, gekoppeld aan een
+    nieuw willekeurig token. Geeft het token terug (dat mag wel in de URL/
+    sessie, de gegevens zelf niet)."""
+    _ai_intake_cleanup()
+    token = secrets.token_urlsafe(24)
+    _save_encrypted(_ai_intake_path(token), {"payload": payload, "created_at": time.time()})
+    return token
+
+
+def _ai_intake_read(token: str | None) -> dict | None:
+    """Leest tijdelijke AI-intakegegevens zonder ze te verwijderen. Geeft None
+    terug als het token onbekend, leeg of verlopen is."""
+    if not token:
+        return None
+    path = _ai_intake_path(token)
+    if not path.exists():
+        return None
+    try:
+        record = _load_encrypted(path, None)
+    except RuntimeError:
+        record = None
+    if not record or time.time() - record.get("created_at", 0) > AI_INTAKE_TTL_SECONDS:
+        path.unlink(missing_ok=True)
+        return None
+    return record.get("payload")
+
+
+def _ai_intake_write(token: str, payload: dict) -> None:
+    """Overschrijft de gegevens van een bestaand token (bijv. na het verwerken
+    van een deel van een voorgestelde lijst), met een verse TTL."""
+    _save_encrypted(_ai_intake_path(token), {"payload": payload, "created_at": time.time()})
+
+
+def _ai_intake_pop(token: str | None) -> dict | None:
+    """Leest tijdelijke AI-intakegegevens en verwijdert ze meteen (eenmalig
+    gebruik, bijv. het overnemen van voorgestelde velden in een formulier)."""
+    payload = _ai_intake_read(token)
+    if token:
+        _ai_intake_path(token).unlink(missing_ok=True)
+    return payload
+
+
+def _ai_intake_delete(token: str | None) -> None:
+    if token:
+        _ai_intake_path(token).unlink(missing_ok=True)
 
 
 def load_employees() -> list[dict]:
@@ -1878,7 +1965,9 @@ def assets_overview():
     assets = load_assets()
     employees = [normalize_employee(e) for e in load_employees()]
 
-    ai_intake_asset = session.pop("_ai_intake_asset", None)
+    asset_token = session.pop("_ai_intake_asset_token", None)
+    asset_bundle = _ai_intake_pop(asset_token) if asset_token else None
+    ai_intake_asset = asset_bundle.get("asset") if asset_bundle else None
     ai_prefilled = bool(ai_intake_asset)
 
     q = request.args.get("q", "").strip().lower()
@@ -1972,12 +2061,20 @@ def asset_ai_intake():
             flash(err, "error")
             return render_template("asset_ai_intake.html", ai_configured=_ai_configured(), raw_text=raw_text)
 
-        session["_ai_intake_asset"] = data["asset"]
+        old_token = session.pop("_ai_intake_asset_token", None)
+        _ai_intake_delete(old_token)
+        session["_ai_intake_asset_token"] = _ai_intake_store({"asset": data["asset"]})
         log_action("ai_intake_extracted", detail="bedrijfsmiddel voorgesteld (proef)")
         flash("Concept gemaakt. Controleer elk veld voordat je opslaat.", "success")
         return redirect(url_for("assets_overview"))
 
-    return render_template("asset_ai_intake.html", ai_configured=_ai_configured(), raw_text=request.args.get("raw_text", ""))
+    raw_text = ""
+    intake_token = request.args.get("t", "")
+    if intake_token:
+        pending = _ai_intake_pop(intake_token)
+        if pending:
+            raw_text = pending.get("raw_text", "")
+    return render_template("asset_ai_intake.html", ai_configured=_ai_configured(), raw_text=raw_text)
 
 
 @app.route("/assets/<asset_id>")
@@ -2242,12 +2339,18 @@ def registration_central_add():
     save_registrations(regs)
     log_action("registration_created", detail=reg_type, target=reg["id"])
     ai_sid = request.form.get("ai_sid", "").strip()
-    if ai_sid and session.get("_ai_intake_registrations_for") == employee_id:
-        remaining = [r for r in session.get("_ai_intake_registrations", []) if r.get("sid") != ai_sid]
-        session["_ai_intake_registrations"] = remaining
-        if not remaining:
-            session.pop("_ai_intake_registrations_for", None)
-            session.pop("_ai_intake_registrations", None)
+    if ai_sid:
+        regs_token = session.get("_ai_intake_registrations_token")
+        if regs_token:
+            regs_bundle = _ai_intake_read(regs_token)
+            if regs_bundle and regs_bundle.get("for_employee_id") == employee_id:
+                remaining = [r for r in regs_bundle.get("registrations", []) if r.get("sid") != ai_sid]
+                if remaining:
+                    regs_bundle["registrations"] = remaining
+                    _ai_intake_write(regs_token, regs_bundle)
+                else:
+                    _ai_intake_delete(regs_token)
+                    session.pop("_ai_intake_registrations_token", None)
     flash("Registratie toegevoegd.", "success")
     if ai_sid:
         return redirect(url_for("employee_detail", employee_id=employee_id, tab="registrations"))
@@ -3553,23 +3656,176 @@ def user_edit_roles(user_id):
     return redirect(url_for("settings_page"))
 
 
-@app.route("/settings/backup")
+# ---------- Back-up & herstel ----------
+#
+# De back-up wordt niet meer alleen gezipt, maar ook nog een keer versleuteld
+# met een apart back-upwachtwoord (los van de gewone opslagsleutels, die WEL
+# gewoon in de back-up blijven zitten - dat is nodig om de inhoud ooit weer te
+# kunnen lezen). Dat wachtwoord wordt nergens door de app bewaard: de gebruiker
+# typt het zelf in bij het maken EN bij het terugzetten van een back-up.
+
+_BACKUP_MAGIC = b"PSBBACKUP1"
+_BACKUP_SALT_LEN = 16
+_BACKUP_KDF_ITERATIONS = 480_000
+_BACKUP_EXCLUDE_TOP_DIRS = {"ai_intake_tmp", "_restore_backups"}
+
+
+def _derive_backup_key(password: str, salt: bytes) -> bytes:
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=_BACKUP_KDF_ITERATIONS)
+    return base64.urlsafe_b64encode(kdf.derive(password.encode("utf-8")))
+
+
+def _iter_backup_files():
+    """Bestanden die in een back-up (of een automatische veiligheidskopie vlak
+    voor een herstel) horen: alles onder STORAGE_DIR, behalve tijdelijke
+    AI-intakebestanden en eerdere veiligheidskopieen van een herstel - anders
+    zou een back-up bij elk volgend herstel weer verder aangroeien."""
+    for path in sorted(STORAGE_DIR.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(STORAGE_DIR)
+        if rel.parts and rel.parts[0] in _BACKUP_EXCLUDE_TOP_DIRS:
+            continue
+        yield path, rel
+
+
+def _decrypt_backup(raw: bytes, password: str) -> tuple[bytes | None, str | None]:
+    """Ontsleutelt een met settings_backup gemaakte, wachtwoordbeveiligde
+    back-up. Geeft (zip-inhoud, None) of (None, foutmelding) terug."""
+    if not password:
+        return None, "Vul het back-upwachtwoord in."
+    if len(raw) < len(_BACKUP_MAGIC) + _BACKUP_SALT_LEN:
+        return None, "Dit lijkt geen geldig back-upbestand (te klein)."
+    if raw[:len(_BACKUP_MAGIC)] != _BACKUP_MAGIC:
+        return None, "Dit lijkt geen back-upbestand van deze app (onbekend bestandsformaat)."
+    salt = raw[len(_BACKUP_MAGIC):len(_BACKUP_MAGIC) + _BACKUP_SALT_LEN]
+    payload = raw[len(_BACKUP_MAGIC) + _BACKUP_SALT_LEN:]
+    key = _derive_backup_key(password, salt)
+    try:
+        zip_bytes = Fernet(key).decrypt(payload)
+    except InvalidToken:
+        return None, "Back-up kon niet worden ontsleuteld. Controleer het back-upwachtwoord en het bestand."
+    return zip_bytes, None
+
+
+@app.route("/settings/backup", methods=["GET", "POST"])
 @admin_required
 @synchronized
 def settings_backup():
+    if request.method == "GET":
+        return render_template("settings_backup.html")
+
+    password = request.form.get("backup_password", "")
+    password_repeat = request.form.get("backup_password_repeat", "")
+    if len(password) < 10:
+        flash("Kies een back-upwachtwoord van minimaal 10 tekens.", "error")
+        return redirect(url_for("settings_backup"))
+    if password != password_repeat:
+        flash("De twee back-upwachtwoorden komen niet overeen.", "error")
+        return redirect(url_for("settings_backup"))
+
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in sorted(STORAGE_DIR.rglob("*")):
-            if path.is_file():
-                zf.write(path, path.relative_to(STORAGE_DIR.parent))
-    buffer.seek(0)
+        for path, rel in _iter_backup_files():
+            zf.write(path, rel)
+    zip_bytes = buffer.getvalue()
+
+    salt = os.urandom(_BACKUP_SALT_LEN)
+    key = _derive_backup_key(password, salt)
+    encrypted = Fernet(key).encrypt(zip_bytes)
+    output = _BACKUP_MAGIC + salt + encrypted
+
     log_action("backup_downloaded")
-    filename = f"backup_praktijk_schitter_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    filename = f"backup_praktijk_schitter_{datetime.now().strftime('%Y%m%d_%H%M%S')}.psbbackup"
     return Response(
-        buffer.getvalue(),
-        mimetype="application/zip",
+        output,
+        mimetype="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
+
+
+@app.route("/settings/restore", methods=["GET", "POST"])
+@admin_required
+@synchronized
+def settings_restore():
+    if request.method == "GET":
+        return render_template("settings_restore.html")
+
+    if not verify_current_admin_password(request.form.get("admin_password", "")):
+        log_action("backup_restore_reauth_failed")
+        flash("Bevestig dit herstel met je eigen huidige wachtwoord.", "error")
+        return redirect(url_for("settings_restore"))
+
+    if request.form.get("confirm") != "on":
+        flash("Bevestig dat je begrijpt dat dit alle huidige gegevens vervangt.", "error")
+        return redirect(url_for("settings_restore"))
+
+    backup_password = request.form.get("backup_password", "")
+    upload = request.files.get("backup_file")
+    if not upload or not upload.filename:
+        flash("Kies eerst een back-upbestand.", "error")
+        return redirect(url_for("settings_restore"))
+
+    raw = upload.read()
+    zip_bytes, err = _decrypt_backup(raw, backup_password)
+    if err:
+        log_action("backup_restore_failed", detail=err)
+        flash(err, "error")
+        return redirect(url_for("settings_restore"))
+
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp_dir = Path(tmp_str)
+        resolved_root = tmp_dir.resolve()
+        try:
+            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+                for member in zf.namelist():
+                    target = (tmp_dir / member).resolve()
+                    if target != resolved_root and resolved_root not in target.parents:
+                        raise ValueError("onveilig pad in back-upbestand")
+                zf.extractall(tmp_dir)
+        except (zipfile.BadZipFile, ValueError):
+            log_action("backup_restore_failed", detail="ongeldig of onveilig zip-bestand")
+            flash("Het back-upbestand kon niet worden uitgepakt (beschadigd of onveilig).", "error")
+            return redirect(url_for("settings_restore"))
+
+        if not any(tmp_dir.iterdir()):
+            flash("Het back-upbestand bevat geen gegevens.", "error")
+            return redirect(url_for("settings_restore"))
+
+        # Automatische veiligheidskopie van de huidige staat, vlak voor het overschrijven.
+        safety_name = f"herstel_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        safety_dir = STORAGE_DIR / "_restore_backups" / safety_name
+        safety_dir.mkdir(parents=True, exist_ok=True)
+        for path, rel in _iter_backup_files():
+            dest = safety_dir / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, dest)
+
+        # Bestaande inhoud vervangen door de herstelde inhoud (veiligheidskopieen blijven staan).
+        for item in STORAGE_DIR.iterdir():
+            if item.name in _BACKUP_EXCLUDE_TOP_DIRS:
+                continue
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+        for item in tmp_dir.iterdir():
+            dest = STORAGE_DIR / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, dest)
+
+    # Sessiesleutel meteen opnieuw inlezen, zodat dit direct geldt zonder herstart.
+    app.secret_key = os.environ.get("SCHITTER_SESSION_SECRET") or _get_or_create_key(SESSION_KEY_FILE)
+
+    log_action("backup_restored", detail=upload.filename)
+    flash(
+        f"Herstel voltooid. Een veiligheidskopie van de vorige staat staat in "
+        f"storage/_restore_backups/{safety_name}.",
+        "success",
+    )
+    return redirect(url_for("settings_page"))
 
 
 @app.route("/audit")
@@ -4507,14 +4763,16 @@ def ai_assistant():
         local_capability, local_payload = _local_assistant_route(prompt)
         if local_capability == "employee_intake":
             log_action("ai_assistant_routed", detail=f"employee_intake (lokaal herkend): {prompt[:80]}")
-            return redirect(url_for("employee_ai_intake", raw_text=prompt))
+            t = _ai_intake_store({"raw_text": prompt})
+            return redirect(url_for("employee_ai_intake", t=t))
 
         if local_capability == "asset_intake":
             if not module_enabled("assets"):
                 flash("De module Bedrijfsmiddelen staat uit.", "error")
                 return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
             log_action("ai_assistant_routed", detail=f"asset_intake (lokaal herkend): {prompt[:80]}")
-            return redirect(url_for("asset_ai_intake", raw_text=prompt))
+            t = _ai_intake_store({"raw_text": prompt})
+            return redirect(url_for("asset_ai_intake", t=t))
 
         if local_capability == "search":
             term = local_payload
@@ -4551,13 +4809,15 @@ def ai_assistant():
                                    categories=categories)
 
         if capability == "employee_intake":
-            return redirect(url_for("employee_ai_intake", raw_text=prompt))
+            t = _ai_intake_store({"raw_text": prompt})
+            return redirect(url_for("employee_ai_intake", t=t))
 
         if capability == "asset_intake":
             if not module_enabled("assets"):
                 flash("De module Bedrijfsmiddelen staat uit.", "error")
                 return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
-            return redirect(url_for("asset_ai_intake", raw_text=prompt))
+            t = _ai_intake_store({"raw_text": prompt})
+            return redirect(url_for("asset_ai_intake", t=t))
 
         if capability == "actions_summary":
             if not module_enabled("signals"):
@@ -4919,15 +5179,20 @@ def employee_new():
             detail=f"{employee['first_name']} {employee['last_name']}",
             target=employee["id"],
         )
-        pending_regs = session.get("_ai_intake_registrations")
+        regs_token = session.get("_ai_intake_registrations_token")
+        regs_bundle = _ai_intake_read(regs_token) if regs_token else None
+        pending_regs = regs_bundle.get("registrations") if regs_bundle else None
         if pending_regs:
-            session["_ai_intake_registrations_for"] = employee["id"]
+            regs_bundle["for_employee_id"] = employee["id"]
+            _ai_intake_write(regs_token, regs_bundle)
             flash("Medewerker toegevoegd. Controleer hieronder de door AI voorgestelde registraties.", "success")
             return redirect(url_for("employee_detail", employee_id=employee["id"], tab="registrations"))
         flash("Medewerker toegevoegd.", "success")
         return redirect(url_for("employee_detail", employee_id=employee["id"]))
 
-    ai_intake = session.pop("_ai_intake_employee", None)
+    employee_token = session.pop("_ai_intake_employee_token", None)
+    employee_bundle = _ai_intake_pop(employee_token) if employee_token else None
+    ai_intake = employee_bundle.get("employee") if employee_bundle else None
     ai_prefilled = bool(ai_intake)
     prefill_employee = normalize_employee(dict(ai_intake)) if ai_intake else None
     return render_template("employee_form.html", employee=prefill_employee, is_new=True,
@@ -4944,14 +5209,29 @@ def employee_ai_intake():
             flash(err, "error")
             return render_template("employee_ai_intake.html", ai_configured=_ai_configured(), raw_text=raw_text)
 
-        session["_ai_intake_employee"] = data["employee"]
-        session["_ai_intake_registrations"] = data["registrations"] if module_enabled("registrations") else []
-        session.pop("_ai_intake_registrations_for", None)
-        log_action("ai_intake_extracted", detail=f"{len(data['registrations'])} registratie(s) voorgesteld (proef)")
+        old_token = session.pop("_ai_intake_employee_token", None)
+        _ai_intake_delete(old_token)
+        session["_ai_intake_employee_token"] = _ai_intake_store({"employee": data["employee"]})
+
+        old_regs_token = session.pop("_ai_intake_registrations_token", None)
+        _ai_intake_delete(old_regs_token)
+        registrations = data["registrations"] if module_enabled("registrations") else []
+        if registrations:
+            session["_ai_intake_registrations_token"] = _ai_intake_store({
+                "registrations": registrations,
+                "for_employee_id": None,
+            })
+        log_action("ai_intake_extracted", detail=f"{len(registrations)} registratie(s) voorgesteld (proef)")
         flash("Concept gemaakt. Controleer elk veld voordat je opslaat.", "success")
         return redirect(url_for("employee_new"))
 
-    return render_template("employee_ai_intake.html", ai_configured=_ai_configured(), raw_text=request.args.get("raw_text", ""))
+    raw_text = ""
+    intake_token = request.args.get("t", "")
+    if intake_token:
+        pending = _ai_intake_pop(intake_token)
+        if pending:
+            raw_text = pending.get("raw_text", "")
+    return render_template("employee_ai_intake.html", ai_configured=_ai_configured(), raw_text=raw_text)
 
 
 @app.route("/employees/<employee_id>")
@@ -4991,8 +5271,11 @@ def employee_detail(employee_id):
         ]
 
     ai_pending_registrations = []
-    if session.get("_ai_intake_registrations_for") == employee_id:
-        ai_pending_registrations = session.get("_ai_intake_registrations", [])
+    regs_token = session.get("_ai_intake_registrations_token")
+    if regs_token:
+        regs_bundle = _ai_intake_read(regs_token)
+        if regs_bundle and regs_bundle.get("for_employee_id") == employee_id:
+            ai_pending_registrations = regs_bundle.get("registrations", [])
 
     return render_template(
         "employee_detail.html",
@@ -5009,12 +5292,17 @@ def employee_detail(employee_id):
 @app.route("/employees/<employee_id>/ai-intake-registrations/<sid>/dismiss", methods=["POST"])
 @admin_required
 def ai_intake_registration_dismiss(employee_id, sid):
-    if session.get("_ai_intake_registrations_for") == employee_id:
-        remaining = [r for r in session.get("_ai_intake_registrations", []) if r.get("sid") != sid]
-        session["_ai_intake_registrations"] = remaining
-        if not remaining:
-            session.pop("_ai_intake_registrations_for", None)
-            session.pop("_ai_intake_registrations", None)
+    regs_token = session.get("_ai_intake_registrations_token")
+    if regs_token:
+        regs_bundle = _ai_intake_read(regs_token)
+        if regs_bundle and regs_bundle.get("for_employee_id") == employee_id:
+            remaining = [r for r in regs_bundle.get("registrations", []) if r.get("sid") != sid]
+            if remaining:
+                regs_bundle["registrations"] = remaining
+                _ai_intake_write(regs_token, regs_bundle)
+            else:
+                _ai_intake_delete(regs_token)
+                session.pop("_ai_intake_registrations_token", None)
     return redirect(url_for("employee_detail", employee_id=employee_id, tab="registrations"))
 
 

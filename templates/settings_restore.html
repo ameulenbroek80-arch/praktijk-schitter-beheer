@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Back-up terugzetten · {{ app_name }}{% endblock %}
+{% block page_title %}Back-up terugzetten{% endblock %}
+{% block page_subtitle %}Herstel alle gegevens vanuit een eerder gedownloade back-up{% endblock %}
+{% block content %}
+<div class="card form-card danger-zone">
+  <div class="section-title"><h2>Dit vervangt alle huidige gegevens</h2></div>
+  <p>
+    Na het terugzetten staan de huidige medewerkers, bedrijfsmiddelen, accounts, registraties en
+    instellingen er niet meer — ze worden volledig vervangen door de inhoud van de gekozen back-up.
+    Er wordt automatisch eerst een veiligheidskopie van de huidige staat gemaakt (in de opslagmap onder
+    <code>_restore_backups</code>), maar controleer toch vooraf goed dat je echt de juiste back-up kiest.
+  </p>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Back-upbestand (.psbbackup)<input type="file" name="backup_file" accept=".psbbackup" required></label>
+    <label>Back-upwachtwoord<input type="password" name="backup_password" required autocomplete="current-password"></label>
+    <label>Bevestig met jouw eigen wachtwoord<input type="password" name="admin_password" required autocomplete="current-password"></label>
+    <label class="confirm-checkbox">
+      <input type="checkbox" id="confirmRestore" name="confirm" required>
+      Ik begrijp dat dit alle huidige gegevens vervangt door de inhoud van deze back-up.
+    </label>
+    <div class="form-actions">
+      <a class="btn secondary" href="{{ url_for('settings_page') }}">Annuleren</a>
+      <button class="btn danger" type="submit" id="confirmRestoreBtn" disabled>Back-up terugzetten</button>
+    </div>
+  </form>
+</div>
+<script>
+const cb = document.getElementById('confirmRestore');
+const btn = document.getElementById('confirmRestoreBtn');
+cb.addEventListener('change', function(){ btn.disabled = !cb.checked; });
+</script>
+{% endblock %}

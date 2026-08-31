@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Back-up maken · {{ app_name }}{% endblock %}
+{% block page_title %}Back-up maken{% endblock %}
+{% block page_subtitle %}Download een versleutelde kopie van alle gegevens{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <div><h2>Back-up downloaden</h2><p>Alle gegevens, extra versleuteld met een apart wachtwoord</p></div>
+  </div>
+  <div class="module-note">
+    De back-up bevat alle gegevens (inclusief de sleutels om ze te kunnen lezen), maar het hele bestand
+    wordt hier nog een keer versleuteld met het wachtwoord dat je hieronder kiest. Zonder dat wachtwoord
+    is de back-up onbruikbaar — ook voor jezelf. Bewaar het dus apart en veilig, bijvoorbeeld in een
+    wachtwoordmanager: de app bewaart dit wachtwoord nergens.
+  </div>
+  <form method="post" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Back-upwachtwoord (minimaal 10 tekens)<input type="password" name="backup_password" minlength="10" required autocomplete="new-password"></label>
+    <label>Herhaal back-upwachtwoord<input type="password" name="backup_password_repeat" minlength="10" required autocomplete="new-password"></label>
+    <div class="form-actions">
+      <a class="btn secondary" href="{{ url_for('settings_page') }}">Annuleren</a>
+      <button class="btn primary" type="submit">⬇ Back-up downloaden</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -84,12 +84,14 @@
   <div class="card">
     <div class="card-header"><div><h2>Data & back-up</h2><p>Exporteren en veiligstellen van gegevens</p></div></div>
     <p class="hint">
-      De back-up bevat alle versleutelde gegevens <em>plus de sleutel</em> om ze te kunnen lezen.
-      Bewaar het gedownloade bestand daarom net zo veilig als de originele data, bijvoorbeeld in een
-      beveiligde back-uplocatie — niet los in een gedeelde map.
+      De back-up bevat alle versleutelde gegevens <em>plus de sleutel</em> om ze te kunnen lezen, en wordt
+      daarom nog een keer als geheel versleuteld met een apart back-upwachtwoord dat je zelf kiest (de app
+      bewaart dit wachtwoord nergens). Bewaar het gedownloade bestand én dat wachtwoord dus apart en veilig
+      — zonder het wachtwoord is de back-up voor niemand meer bruikbaar, ook niet voor jezelf.
     </p>
     <div class="form-actions">
-      <a class="btn secondary" href="{{ url_for('settings_backup') }}">⬇ Back-up downloaden (.zip)</a>
+      <a class="btn secondary" href="{{ url_for('settings_backup') }}">⬇ Back-up maken (versleuteld)</a>
+      <a class="btn secondary" href="{{ url_for('settings_restore') }}">↥ Back-up terugzetten</a>
       <a class="btn secondary" href="{{ url_for('employees_export') }}">⬇ Medewerkers exporteren (.csv)</a>
       <a class="btn secondary" href="{{ url_for('audit_log') }}">🕵 Auditlog bekijken</a>
     </div>
