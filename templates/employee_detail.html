@@ -279,7 +279,20 @@
   </div>
 
   <div class="card">
-    <div class="card-header"><div><h2>Nieuw veld maken</h2><p>Dit veld wordt daarna beschikbaar bij alle medewerkers</p></div></div>
+    <div class="card-header"><div><h2>Velden beheren</h2><p>Nieuw veld maken of een bestaand veld verwijderen - geldt voor alle medewerkers</p></div></div>
+    {% if settings.custom_field_definitions %}
+    <div class="record-list">
+      {% for f in settings.custom_field_definitions %}
+      <div class="record-row">
+        <div><strong>{{ f.label }}</strong><span>{{ f.section }}</span></div>
+        <form method="post" action="{{ url_for('custom_field_definition_delete', field_id=f.id) }}" onsubmit="return confirm('Veld ' + {{ f.label|tojson }} + ' verwijderen? Dit verwijdert het veld en de ingevulde waarde bij alle medewerkers.')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="icon-btn danger" type="submit" title="Verwijderen">×</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
     <form class="inline-form" method="post" action="{{ url_for('custom_field_definition_add') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>Naam veld *<input name="label" placeholder="bijv. Beroepsvereniging" required></label>

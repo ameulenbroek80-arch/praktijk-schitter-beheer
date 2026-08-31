@@ -99,7 +99,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.3.1"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -5515,6 +5515,29 @@ def custom_field_definition_add():
     save_settings(settings)
     log_action("custom_field_definition_added", detail=label)
     flash(f"Extra veld '{label}' toegevoegd.", "success")
+    return redirect(request.referrer or url_for("dashboard"))
+
+
+@app.route("/settings/custom-fields/<field_id>/delete", methods=["POST"])
+@admin_required
+@synchronized
+def custom_field_definition_delete(field_id):
+    """Verwijdert een extra-veld-definitie. Dit is een praktijkbreed veld (elke
+    medewerker heeft hetzelfde veld beschikbaar), dus verwijderen haalt het
+    overal weg - de bevestigingsvraag in de template maakt dat duidelijk. Al
+    ingevulde waarden bij medewerkers blijven ongebruikt in hun dossier staan
+    (ze worden nergens meer getoond) maar worden hier niet apart opgeruimd."""
+    settings = load_settings()
+    definitions = settings.get("custom_field_definitions", [])
+    target = next((d for d in definitions if d.get("id") == field_id), None)
+    if not target:
+        flash("Extra veld niet gevonden.", "error")
+        return redirect(request.referrer or url_for("dashboard"))
+
+    settings["custom_field_definitions"] = [d for d in definitions if d.get("id") != field_id]
+    save_settings(settings)
+    log_action("custom_field_definition_deleted", detail=target.get("label", ""))
+    flash(f"Extra veld '{target.get('label','')}' verwijderd.", "success")
     return redirect(request.referrer or url_for("dashboard"))
 
 
