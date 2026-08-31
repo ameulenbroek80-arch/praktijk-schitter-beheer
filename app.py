@@ -112,7 +112,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.6.0"
+APP_VERSION = "2.6.1"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -1951,6 +1951,39 @@ def _apply_sort(rows, sort_key, direction, field_map):
     return sorted_rows, sort_key, direction
 
 
+_LAST_NAME_PREFIXES = sorted([
+    "van der", "van den", "van de", "van het", "van 't", "van",
+    "de la", "de le", "de", "den", "der", "des", "die", "del", "della",
+    "ten", "ter", "te",
+    "het", "'t",
+    "op de", "op den", "op het", "op 't", "op",
+    "in de", "in den", "in het", "in 't", "in",
+    "aan de", "aan den", "aan het", "aan 't", "aan",
+    "uit de", "uit den", "uit het", "uit",
+    "onder de", "onder den", "onder het", "onder",
+    "over de", "over het", "over",
+    "voor de", "voor",
+    "von der", "von den", "von de", "von",
+    "du", "di", "da", "dos", "das", "do",
+    "la", "le", "les", "el", "al",
+], key=len, reverse=True)  # langste voorvoegsel eerst geprobeerd (bijv. 'van der' voor 'van')
+
+
+def _last_name_sort_key(last_name: str) -> str:
+    """Geeft een sorteersleutel voor een achternaam terug die een voorvoegsel
+    (tussenvoegsel, zoals 'van', 'de', 'van der') negeert. Er is in dit systeem geen
+    apart veld voor het voorvoegsel - het staat gewoon vooraan in last_name. Zonder
+    deze correctie sorteert 'van der Berg' onder de V in plaats van onder de B, wat
+    bij een alfabetische medewerkerslijst als een fout aanvoelt. Alleen de sortering
+    verandert; de weergave van de naam blijft overal precies zoals ingevoerd."""
+    name = (last_name or "").strip()
+    lowered = name.lower()
+    for prefix in _LAST_NAME_PREFIXES:
+        if lowered == prefix or lowered.startswith(prefix + " "):
+            return name[len(prefix):].strip().lower()
+    return lowered
+
+
 def _search_assets(q: str = ""):
     """Filtert bedrijfsmiddelen op trefwoord (naam/merk/model/serienummer/medewerker/...) -
     gedeeld door de /assets-pagina en de AI-zoekassistent."""
@@ -2111,7 +2144,7 @@ def asset_detail(asset_id):
         abort(404)
     employees = sorted(
         [normalize_employee(e) for e in load_employees()],
-        key=lambda e:(e.get("last_name","").lower(), e.get("first_name","").lower())
+        key=lambda e:(_last_name_sort_key(e.get("last_name","")), e.get("first_name","").lower())
     )
     employees_map = {e["id"]: e for e in employees}
     asset = dict(asset)
@@ -2440,7 +2473,7 @@ def _search_credentials(q: str = "", scope_filter: str = "", type_filter: str = 
     records = load_credentials()
     employees = sorted(
         [normalize_employee(e) for e in load_employees()],
-        key=lambda e:(e.get("last_name","").lower(), e.get("first_name","").lower())
+        key=lambda e:(_last_name_sort_key(e.get("last_name","")), e.get("first_name","").lower())
     )
     employees_map = {e["id"]: e for e in employees}
     q = (q or "").strip().lower()
@@ -5118,7 +5151,12 @@ def dashboard():
 
     sorted_employees = sorted(
         employees,
-        key=lambda e: (e.get("last_name", "").lower(), e.get("first_name", "").lower())
+        key=lambda e: (_last_name_sort_key(e.get("last_name", "")), e.get("first_name", "").lower())
+    )
+    dash_sort_key = request.args.get("sort", "")
+    dash_sort_dir = request.args.get("dir", "asc")
+    sorted_employees, dash_sort_key, dash_sort_dir = _apply_sort(
+        sorted_employees, dash_sort_key, dash_sort_dir, _EMPLOYEE_SORT_FIELDS
     )
 
     attention = []
@@ -5258,6 +5296,8 @@ def dashboard():
         recent_docs=recent_docs[:5],
         asset_counts=asset_counts,
         today=datetime.now(),
+        sort=dash_sort_key,
+        dir=dash_sort_dir,
     )
 
 def _search_employees(q: str = ""):
@@ -5270,12 +5310,12 @@ def _search_employees(q: str = ""):
             e for e in items
             if q in f"{e.get('first_name','')} {e.get('last_name','')} {e.get('function','')}".lower()
         ]
-    items.sort(key=lambda e: (e.get("last_name", "").lower(), e.get("first_name", "").lower()))
+    items.sort(key=lambda e: (_last_name_sort_key(e.get("last_name", "")), e.get("first_name", "").lower()))
     return items
 
 
 _EMPLOYEE_SORT_FIELDS = {
-    "name": lambda e: ((e.get("last_name") or "").lower(), (e.get("first_name") or "").lower()),
+    "name": lambda e: (_last_name_sort_key(e.get("last_name") or ""), (e.get("first_name") or "").lower()),
     "function": lambda e: (e.get("function") or "").lower(),
     "start_date": lambda e: e.get("start_date") or "",
     "status": lambda e: (e.get("status") or "").lower(),
@@ -5297,7 +5337,7 @@ def employees():
 @admin_required
 def employees_export():
     items = [normalize_employee(e) for e in load_employees()]
-    items.sort(key=lambda e: (e.get("last_name", "").lower(), e.get("first_name", "").lower()))
+    items.sort(key=lambda e: (_last_name_sort_key(e.get("last_name", "")), e.get("first_name", "").lower()))
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";")
     writer.writerow([

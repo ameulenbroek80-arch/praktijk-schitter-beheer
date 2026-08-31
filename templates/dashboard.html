@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import sortable_th %}
 {% block title %}Dashboard · {{ app_name }}{% endblock %}
 {% block page_title %}Dashboard{% endblock %}
 {% block page_subtitle %}Goedemiddag, {{ session.get('user_name') }}. Hier zie je wat aandacht nodig heeft.{% endblock %}
@@ -41,7 +42,14 @@
     {% if employees %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Naam</th><th>Functie</th>{% if module_enabled('hr_employment') %}<th>In dienst</th>{% endif %}{% if module_enabled('assets') %}<th>Middelen</th>{% endif %}<th>Status</th><th></th></tr></thead>
+        <thead><tr>
+          {{ sortable_th('Naam', 'name', 'dashboard', sort, dir) }}
+          {{ sortable_th('Functie', 'function', 'dashboard', sort, dir) }}
+          {% if module_enabled('hr_employment') %}{{ sortable_th('In dienst', 'start_date', 'dashboard', sort, dir) }}{% endif %}
+          {% if module_enabled('assets') %}<th>Middelen</th>{% endif %}
+          {{ sortable_th('Status', 'status', 'dashboard', sort, dir) }}
+          <th></th>
+        </tr></thead>
         <tbody>
         {% for e in employees[:8] %}
           <tr>
