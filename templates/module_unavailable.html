@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Niet beschikbaar · {{ app_name }}{% endblock %}
+{% block page_title %}Onderdeel niet beschikbaar{% endblock %}
+{% block page_subtitle %}Dit onderdeel staat op dit moment uitgeschakeld.{% endblock %}
+{% block content %}
+<div class="card">
+  <p>Deze functie is op dit moment niet beschikbaar. Neem contact op met je beheerder als je denkt dat dit niet klopt.</p>
+  <a class="btn primary" href="{{ url_for('logout') }}">Uitloggen</a>
+</div>
+{% endblock %}

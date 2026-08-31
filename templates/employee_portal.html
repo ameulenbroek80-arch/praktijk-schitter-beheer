@@ -23,11 +23,11 @@
 </section>
 <div class="detail-grid">
   <div class="card">
-    <div class="card-header"><div><h2>Mijn uren</h2><p>Laatste registraties</p></div><a class="btn primary" href="{{ url_for('my_hours') }}">Uren registreren</a></div>
+    <div class="card-header"><div><h2>Mijn uren</h2><p>Laatste registraties</p></div>{% if module_enabled('hours') %}<a class="btn primary" href="{{ url_for('my_hours') }}">Uren registreren</a>{% endif %}</div>
     {% if entries %}<div class="record-list">{% for e in entries %}<div class="record-row"><div><strong>{{ e.date }}</strong><span>{{ e.category }}</span></div><div>{{ e.hours }} uur</div><div>{{ e.description }}</div></div>{% endfor %}</div>{% else %}<div class="compact-empty">Nog geen uren geregistreerd.</div>{% endif %}
   </div>
   <div class="card">
-    <div class="card-header"><div><h2>Mijn verlof</h2><p>Laatste aanvragen</p></div><a class="btn primary" href="{{ url_for('my_leave') }}">Verlof aanvragen</a></div>
+    <div class="card-header"><div><h2>Mijn verlof</h2><p>Laatste aanvragen</p></div>{% if module_enabled('leave') %}<a class="btn primary" href="{{ url_for('my_leave') }}">Verlof aanvragen</a>{% endif %}</div>
     {% if requests %}<div class="record-list">{% for r in requests %}<div class="record-row"><div><strong>{{ r.start_date }}{% if r.end_date %} t/m {{ r.end_date }}{% endif %}</strong><span>{{ r.status }}</span></div><div>{{ r.hours }} uur</div></div>{% endfor %}</div>{% else %}<div class="compact-empty">Nog geen verlofaanvragen.</div>{% endif %}
   </div>
 </div>

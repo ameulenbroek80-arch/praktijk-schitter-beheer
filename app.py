@@ -112,7 +112,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.6.1"
+APP_VERSION = "2.6.2"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -442,7 +442,14 @@ def module_required(key: str):
         def wrapped(*args, **kwargs):
             if not module_enabled(key):
                 flash("Deze module staat momenteel uitgeschakeld.", "error")
-                return redirect(url_for("dashboard"))
+                if is_admin():
+                    return redirect(url_for("dashboard"))
+                # Niet-beheerders mogen nooit naar /dashboard: die route stuurt
+                # niet-beheerders op zijn beurt terug (admin_required), wat een
+                # oneindige redirect-loop zou geven als hun eigen module
+                # (bv. employee_portal) uitstaat. Stuur ze naar een neutrale
+                # pagina die altijd bereikbaar is, ongeacht rol of moduleconfig.
+                return redirect(url_for("module_unavailable"))
             return view(*args, **kwargs)
         return wrapped
     return decorator
@@ -3932,6 +3939,12 @@ def account_password():
             flash("Wachtwoord gewijzigd.", "success")
             return redirect(url_for("index"))
     return render_template("account_password.html")
+
+
+@app.route("/onderdeel-uitgeschakeld")
+@login_required
+def module_unavailable():
+    return render_template("module_unavailable.html")
 
 
 # ---------- Auth ----------
