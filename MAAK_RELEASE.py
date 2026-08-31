@@ -2,7 +2,7 @@ from pathlib import Path
 import zipfile, re, shutil
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "2.2.0"
+VERSION = "2.2.1"
 OUTPUT = ROOT.parent / f"Praktijk_Schitter_Beheer_v{VERSION}_release.zip"
 
 EXCLUDE_DIRS = {".venv", "__pycache__", ".git", ".idea", ".vscode"}

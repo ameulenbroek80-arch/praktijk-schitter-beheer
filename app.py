@@ -99,7 +99,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.2.1"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -3852,6 +3852,11 @@ def collect_action_items():
 GROQ_MODEL = "qwen/qwen3.8-27b"  # centraal instelbaar - hier wijzigen voor een ander Groq-model
 GEMINI_MODEL = "gemini-2.5-flash"
 
+# Cloudflare (voor de Groq-API) blokkeert verzoeken met de standaard urllib-
+# User-Agent ("Python-urllib/3.x") met een kale HTTP 403 - vandaar een expliciete,
+# herkenbare User-Agent op alle AI-aanroepen.
+AI_HTTP_USER_AGENT = f"PraktijkSchitterBeheer/{APP_VERSION}"
+
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 AI_BOTH_PROVIDERS_QUOTA_MSG = (
@@ -3888,6 +3893,7 @@ def _call_groq(system_prompt: str, user_prompt: str) -> tuple[str | None, str | 
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "User-Agent": AI_HTTP_USER_AGENT,
         },
         method="POST",
     )
@@ -3929,6 +3935,7 @@ def _call_gemini(system_prompt: str, user_prompt: str) -> tuple[str | None, str 
         headers={
             "x-goog-api-key": api_key,
             "Content-Type": "application/json",
+            "User-Agent": AI_HTTP_USER_AGENT,
         },
         method="POST",
     )
