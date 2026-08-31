@@ -167,7 +167,7 @@
       {% for u in users %}
       <div class="record-row user-wide">
         <div><strong>{{ u.name }}</strong><span>{{ u.email }}</span></div>
-        <div>{{ u.role }}</div>
+        <div>{{ u.roles|join(' + ') if u.roles else u.get('role', '') }}</div>
         <div>
           {% if u.employee_id %}Gekoppeld aan medewerker<br>{% endif %}
           {% if u.get('invite_pending') %}<span class="badge-pending">Wacht op setup</span>{% endif %}
@@ -180,10 +180,11 @@
           </form>
           {% endif %}
           <button type="button" class="btn secondary tiny" onclick="document.getElementById('reset-{{ u.id }}').classList.toggle('open')">Wachtwoord resetten</button>
+          <button type="button" class="btn secondary tiny" onclick="document.getElementById('roles-{{ u.id }}').classList.toggle('open')">Rollen bewerken</button>
           {% if u.email != session.get('user_email') %}
           <form method="post" action="{{ url_for('user_delete', user_id=u.id) }}" onsubmit="return confirm('Deze gebruiker verwijderen?')">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            {% if u.role == 'Beheerder' %}<input class="reauth-mini" type="password" name="admin_password" placeholder="jouw wachtwoord" required autocomplete="current-password">{% endif %}
+            {% if 'Beheerder' in u.roles %}<input class="reauth-mini" type="password" name="admin_password" placeholder="jouw wachtwoord" required autocomplete="current-password">{% endif %}
             <button class="icon-btn danger" type="submit" title="Verwijderen">×</button>
           </form>
           {% endif %}
@@ -191,8 +192,23 @@
         <form id="reset-{{ u.id }}" class="inline-form reset-password-form" method="post" action="{{ url_for('user_reset_password', user_id=u.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <label>Nieuw tijdelijk wachtwoord<input type="password" name="new_password" minlength="10" required placeholder="minimaal 10 tekens"></label>
-          {% if u.role == 'Beheerder' %}<label>Bevestig met jouw wachtwoord<input type="password" name="admin_password" required autocomplete="current-password"></label>{% endif %}
+          {% if 'Beheerder' in u.roles %}<label>Bevestig met jouw wachtwoord<input type="password" name="admin_password" required autocomplete="current-password"></label>{% endif %}
           <button class="btn primary tiny" type="submit">Wachtwoord instellen</button>
+        </form>
+        <form id="roles-{{ u.id }}" class="inline-form roles-edit-form" method="post" action="{{ url_for('user_edit_roles', user_id=u.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label class="checkbox-inline"><input type="checkbox" name="roles" value="Beheerder" {{ 'checked' if 'Beheerder' in u.roles else '' }}> Beheerder</label>
+          <label class="checkbox-inline"><input type="checkbox" name="roles" value="Medewerker" id="rolesMedewerker-{{ u.id }}" onchange="document.getElementById('employeeLinkEdit-{{ u.id }}').style.display=this.checked?'flex':'none'" {{ 'checked' if 'Medewerker' in u.roles else '' }}> Medewerker</label>
+          <label id="employeeLinkEdit-{{ u.id }}" style="display:{{ 'flex' if 'Medewerker' in u.roles else 'none' }}">Koppel aan medewerker
+            <select name="employee_id">
+              <option value="">Niet gekoppeld</option>
+              {% for e in employees %}<option value="{{ e.id }}" {{ 'selected' if u.employee_id == e.id else '' }}>{{ e.first_name }} {{ e.last_name }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Bevestig met jouw wachtwoord (nodig bij wijzigingen die de beheerdersrol raken)
+            <input type="password" name="admin_password" autocomplete="current-password">
+          </label>
+          <button class="btn primary tiny" type="submit">Rollen opslaan</button>
         </form>
       </div>
       {% endfor %}
@@ -203,11 +219,9 @@
       <h3>Gebruiker toevoegen</h3>
       <label>Naam<input name="name" required></label>
       <label>E-mailadres<input type="email" name="email" required></label>
-      <label>Rol
-        <select name="role" id="roleSelect">
-          <option>Beheerder</option>
-          <option>Medewerker</option>
-        </select>
+      <label>Rollen
+        <span class="checkbox-inline"><input type="checkbox" name="roles" value="Beheerder" id="roleBeheerder" checked> Beheerder</span>
+        <span class="checkbox-inline"><input type="checkbox" name="roles" value="Medewerker" id="roleMedewerker"> Medewerker</span>
       </label>
       <label id="employeeLink">Koppel aan medewerker
         <select name="employee_id">
@@ -233,15 +247,15 @@
   </div>
 </div>
 <script>
-const rs=document.getElementById('roleSelect'), el=document.getElementById('employeeLink');
+const rb=document.getElementById('roleBeheerder'), rm=document.getElementById('roleMedewerker');
+const el=document.getElementById('employeeLink');
 const ar=document.getElementById('adminReauthField'), arInput=ar.querySelector('input');
 function toggleEmployee(){
-  const employee = rs.value==='Medewerker';
-  el.style.display = employee ? 'flex' : 'none';
-  ar.style.display = employee ? 'none' : 'flex';
-  arInput.required = !employee;
+  el.style.display = rm.checked ? 'flex' : 'none';
+  ar.style.display = rb.checked ? 'flex' : 'none';
+  arInput.required = rb.checked;
 }
-rs.addEventListener('change',toggleEmployee); toggleEmployee();
+rb.addEventListener('change',toggleEmployee); rm.addEventListener('change',toggleEmployee); toggleEmployee();
 
 const ms=document.getElementById('methodSelect'), pw=document.getElementById('manualPasswordField'), pwInput=pw.querySelector('input');
 function toggleMethod(){

@@ -99,7 +99,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.2.1"
+APP_VERSION = "2.3.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -637,9 +637,15 @@ def load_users() -> list[dict]:
     if not AUTH_FILE.exists():
         return []
     try:
-        return json.loads(AUTH_FILE.read_text(encoding="utf-8"))
+        users = json.loads(AUTH_FILE.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return []
+    # Oudere accounts kennen alleen het losse veld 'role'; hier omgezet naar
+    # 'roles' (lijst), zodat een account meerdere rollen tegelijk kan hebben.
+    for u in users:
+        if not isinstance(u.get("roles"), list) or not u["roles"]:
+            u["roles"] = [u.get("role") or "Beheerder"]
+    return users
 
 
 def save_users(users: list[dict]) -> None:
@@ -706,7 +712,7 @@ def verify_current_admin_password(password: str) -> bool:
     if not password:
         return False
     user = current_user()
-    if not user or user.get("role") != "Beheerder":
+    if not user or "Beheerder" not in user.get("roles", []):
         return False
     password_hash = user.get("password_hash")
     return bool(password_hash and check_password_hash(password_hash, password))
@@ -721,7 +727,7 @@ def current_user():
 
 def is_admin():
     user = current_user()
-    return bool(user and user.get("role") == "Beheerder")
+    return bool(user and "Beheerder" in user.get("roles", []))
 
 
 def admin_required(view):
@@ -738,7 +744,7 @@ def admin_required(view):
 
 def get_employee_for_current_user():
     user = current_user()
-    if not user or user.get("role") != "Medewerker":
+    if not user or "Medewerker" not in user.get("roles", []):
         return None
     employee_id = user.get("employee_id")
     if not employee_id:
@@ -3242,7 +3248,8 @@ def user_add():
     users = load_users()
     name = request.form.get("name","").strip()
     email = request.form.get("email","").strip().lower()
-    role = request.form.get("role","Beheerder")
+    roles = [r for r in request.form.getlist("roles") if r in ("Beheerder", "Medewerker")]
+    role_label = " + ".join(roles)
     employee_id = request.form.get("employee_id","").strip()
     method = request.form.get("method", "invite")
     password = request.form.get("password","")
@@ -3250,19 +3257,22 @@ def user_add():
     if not name or not email:
         flash("Naam en e-mailadres zijn verplicht.", "error")
         return redirect(url_for("settings_page"))
+    if not roles:
+        flash("Kies minstens één rol (Beheerder en/of Medewerker).", "error")
+        return redirect(url_for("settings_page"))
     if not EMAIL_RE.match(email):
         flash("Dit e-mailadres ziet er niet geldig uit.", "error")
         return redirect(url_for("settings_page"))
     if any(u.get("email")==email for u in users):
         flash("Deze gebruiker bestaat al.", "error")
         return redirect(url_for("settings_page"))
-    if role == "Medewerker" and not employee_id:
+    if "Medewerker" in roles and not employee_id:
         flash("Koppel een medewerker aan het medewerkersaccount.", "error")
         return redirect(url_for("settings_page"))
     if method == "manual" and len(password) < 10:
         flash("Kies een wachtwoord van minimaal 10 tekens, of stuur een setup-link per e-mail.", "error")
         return redirect(url_for("settings_page"))
-    if role == "Beheerder":
+    if "Beheerder" in roles:
         admin_password = request.form.get("admin_password", "")
         if not verify_current_admin_password(admin_password):
             log_action("admin_creation_reauth_failed", detail=email)
@@ -3270,8 +3280,8 @@ def user_add():
             return redirect(url_for("settings_page"))
 
     user = {
-        "id": str(uuid.uuid4()), "name": name, "email": email, "role": role,
-        "employee_id": employee_id if role == "Medewerker" else "",
+        "id": str(uuid.uuid4()), "name": name, "email": email, "roles": roles,
+        "employee_id": employee_id if "Medewerker" in roles else "",
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -3279,8 +3289,8 @@ def user_add():
         user["password_hash"] = generate_password_hash(password)
         users.append(user)
         save_users(users)
-        log_action("user_created", detail=email, target=role)
-        flash(f"{role} toegevoegd met een handmatig ingesteld wachtwoord.", "success")
+        log_action("user_created", detail=email, target=role_label)
+        flash(f"{role_label} toegevoegd met een handmatig ingesteld wachtwoord.", "success")
         return redirect(url_for("settings_page"))
 
     token = _create_invite(user)
@@ -3295,12 +3305,12 @@ def user_add():
         invite_text,
         invite_html,
     )
-    log_action("user_invited", detail=email, target=role)
+    log_action("user_invited", detail=email, target=role_label)
     if sent:
-        flash(f"{role} toegevoegd. Uitnodiging met setup-link is verzonden naar {email}.", "success")
+        flash(f"{role_label} toegevoegd. Uitnodiging met setup-link is verzonden naar {email}.", "success")
     else:
         flash(
-            f"{role} toegevoegd, maar de uitnodigingsmail kon niet worden verzonden ({error}). "
+            f"{role_label} toegevoegd, maar de uitnodigingsmail kon niet worden verzonden ({error}). "
             f"Deel deze setup-link handmatig (48 uur geldig): {invite_link}",
             "error"
         )
@@ -3458,18 +3468,18 @@ def user_delete(user_id):
     if target.get("email") == session.get("user_email"):
         flash("Je kunt je eigen account niet verwijderen. Vraag een andere beheerder.", "error")
         return redirect(url_for("settings_page"))
-    admins = [u for u in users if u.get("role") == "Beheerder"]
-    if target.get("role") == "Beheerder" and len(admins) <= 1:
+    admins = [u for u in users if "Beheerder" in u.get("roles", [])]
+    if "Beheerder" in target.get("roles", []) and len(admins) <= 1:
         flash("Dit is de enige beheerder; verwijderen kan niet zonder de praktijk buiten te sluiten.", "error")
         return redirect(url_for("settings_page"))
-    if target.get("role") == "Beheerder":
+    if "Beheerder" in target.get("roles", []):
         if not verify_current_admin_password(request.form.get("admin_password", "")):
             log_action("admin_delete_reauth_failed", detail=target.get("email", ""))
             flash("Bevestig het verwijderen van een beheerder met je eigen huidige wachtwoord.", "error")
             return redirect(url_for("settings_page"))
     users = [u for u in users if u.get("id") != user_id]
     save_users(users)
-    log_action("user_deleted", detail=target.get("email",""), target=target.get("role",""))
+    log_action("user_deleted", detail=target.get("email",""), target=" + ".join(target.get("roles", [])))
     flash("Gebruiker verwijderd.", "success")
     return redirect(url_for("settings_page"))
 
@@ -3485,7 +3495,7 @@ def user_reset_password(user_id):
         flash("Gebruiker niet gevonden.", "error")
     elif len(new_password) < 10:
         flash("Het nieuwe wachtwoord moet minimaal 10 tekens zijn.", "error")
-    elif target.get("role") == "Beheerder" and not verify_current_admin_password(request.form.get("admin_password", "")):
+    elif "Beheerder" in target.get("roles", []) and not verify_current_admin_password(request.form.get("admin_password", "")):
         log_action("admin_password_reset_reauth_failed", detail=target.get("email", ""))
         flash("Bevestig het resetten van een beheerderswachtwoord met je eigen huidige wachtwoord.", "error")
     else:
@@ -3493,6 +3503,53 @@ def user_reset_password(user_id):
         save_users(users)
         log_action("user_password_reset", detail=target.get("email",""))
         flash(f"Wachtwoord van {target.get('name','')} is gewijzigd. Geef dit veilig door.", "success")
+    return redirect(url_for("settings_page"))
+
+
+@app.route("/settings/users/<user_id>/edit-roles", methods=["POST"])
+@admin_required
+@synchronized
+def user_edit_roles(user_id):
+    """Wijzig de rollen (Beheerder/Medewerker) en medewerkerskoppeling van een
+    bestaand account - dit kon voorheen alleen bij het aanmaken. Nodig zodra
+    iemand achteraf ook aan een medewerkersdossier gekoppeld moet worden (of
+    de beheerdersrol erbij/eraf moet), zonder het account te verwijderen en
+    opnieuw aan te maken."""
+    users = load_users()
+    target = next((u for u in users if u.get("id") == user_id), None)
+    if not target:
+        flash("Gebruiker niet gevonden.", "error")
+        return redirect(url_for("settings_page"))
+
+    new_roles = [r for r in request.form.getlist("roles") if r in ("Beheerder", "Medewerker")]
+    if not new_roles:
+        flash("Kies minstens één rol (Beheerder en/of Medewerker).", "error")
+        return redirect(url_for("settings_page"))
+
+    employee_id = request.form.get("employee_id", "").strip()
+    if "Medewerker" in new_roles and not employee_id:
+        flash("Koppel een medewerker aan het medewerkersaccount.", "error")
+        return redirect(url_for("settings_page"))
+
+    had_admin = "Beheerder" in target.get("roles", [])
+    will_have_admin = "Beheerder" in new_roles
+
+    other_admins = [u for u in users if u.get("id") != user_id and "Beheerder" in u.get("roles", [])]
+    if had_admin and not will_have_admin and not other_admins:
+        flash("Dit is de enige beheerder; de beheerdersrol kan niet worden weggehaald zonder de praktijk buiten te sluiten.", "error")
+        return redirect(url_for("settings_page"))
+
+    if had_admin or will_have_admin:
+        if not verify_current_admin_password(request.form.get("admin_password", "")):
+            log_action("user_role_edit_reauth_failed", detail=target.get("email", ""))
+            flash("Bevestig deze wijziging met je eigen huidige wachtwoord.", "error")
+            return redirect(url_for("settings_page"))
+
+    target["roles"] = new_roles
+    target["employee_id"] = employee_id if "Medewerker" in new_roles else ""
+    save_users(users)
+    log_action("user_roles_updated", detail=target.get("email",""), target=" + ".join(new_roles))
+    flash(f"Rollen van {target.get('name','')} bijgewerkt.", "success")
     return redirect(url_for("settings_page"))
 
 
@@ -3561,7 +3618,7 @@ def index():
     if "user_email" not in session:
         return redirect(url_for("login"))
     user = current_user()
-    if user and user.get("role") == "Medewerker":
+    if user and "Beheerder" not in user.get("roles", []) and "Medewerker" in user.get("roles", []):
         return redirect(url_for("employee_portal"))
     return redirect(url_for("dashboard"))
 
@@ -3601,7 +3658,7 @@ def setup():
             "name": name,
             "email": email,
             "password_hash": generate_password_hash(password),
-            "role": "Beheerder",
+            "roles": ["Beheerder"],
             "created_at": datetime.now().isoformat(timespec="seconds"),
         }])
         try:
@@ -3644,9 +3701,9 @@ def login():
         _ensure_csrf_token()
         session["user_email"] = user["email"]
         session["user_name"] = user["name"]
-        session["user_role"] = user.get("role", "Beheerder")
+        session["user_roles"] = user.get("roles", ["Beheerder"])
         log_action("login_success", user=user["name"])
-        if user.get("role") == "Medewerker":
+        if "Beheerder" not in user.get("roles", []) and "Medewerker" in user.get("roles", []):
             return redirect(url_for("employee_portal"))
         return redirect(url_for("dashboard"))
 
@@ -5181,7 +5238,7 @@ def _can_view_employee_photo(employee_id: str) -> bool:
     if is_admin():
         return True
     user = current_user()
-    return bool(user and user.get("role") == "Medewerker" and user.get("employee_id") == employee_id)
+    return bool(user and "Medewerker" in user.get("roles", []) and user.get("employee_id") == employee_id)
 
 
 @app.route("/employees/<employee_id>/photo", methods=["POST"])
@@ -5284,7 +5341,7 @@ def employee_photo(employee_id):
 @app.context_processor
 def inject_sidebar_photo():
     user = current_user()
-    if user and user.get("role") == "Medewerker" and user.get("employee_id"):
+    if user and "Medewerker" in user.get("roles", []) and user.get("employee_id"):
         emp = find_employee(user["employee_id"])
         if emp and emp.get("photo"):
             return {"sidebar_photo_employee_id": user["employee_id"]}

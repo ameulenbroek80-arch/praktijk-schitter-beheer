@@ -123,6 +123,8 @@ textarea{resize:vertical}.form-actions{display:flex;justify-content:flex-end;gap
 .asset-details dt{color:var(--muted)}.asset-details dd{margin:0}
 .asset-note{margin-top:12px;padding:10px 12px;border-radius:10px;background:#f5f8f8;font-size:13px}.asset-note p{margin:5px 0 0;white-space:pre-wrap}
 .inline-form{padding:0 20px 20px;display:grid;gap:13px}
+.inline-form label.checkbox-inline,.inline-form span.checkbox-inline{display:flex;align-items:center;gap:7px;font-weight:600;color:var(--ink,#1c2b2b)}
+.inline-form label.checkbox-inline input,.inline-form span.checkbox-inline input{width:auto}
 .sticky-card{align-self:start;position:sticky;top:20px}
 .icon-btn{width:30px;height:30px;border:0;border-radius:9px;cursor:pointer;background:#eef3f3;color:#4f5d63;font-size:20px;line-height:1}
 .icon-btn.danger:hover{background:rgba(235,96,145,.14);color:var(--pink)}
