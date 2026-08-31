@@ -2,7 +2,7 @@ from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "2.7.0"
+VERSION = "2.7.2"
 OUTPUT = ROOT.parent / f"Praktijk_Schitter_Beheer_v{VERSION}_release.zip"
 
 # Alles onder storage/ is runtime-data: versleutelde gegevens, sleutels

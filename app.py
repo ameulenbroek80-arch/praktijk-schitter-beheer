@@ -112,7 +112,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.7.0"
+APP_VERSION = "2.7.2"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -6182,6 +6182,25 @@ def employee_portal():
         requests=requests[:8], balance=balance, total_recent_hours=total_recent_hours,
         employee_credentials=employee_credentials, employee_registrations=employee_registrations,
     )
+
+
+@app.route("/mijn/accounts/<credential_id>/reveal", methods=["POST"])
+@login_required
+@module_required("credentials")
+def my_credential_reveal(credential_id):
+    """Toont het geheim van een account/code aan de medewerker zelf - maar
+    uitsluitend als die credential ook echt aan zijn/haar employee_id
+    gekoppeld is. Geen enkele andere medewerker-route levert een geheim op;
+    dit is bewust de enige, smal-gescopede uitzondering, expliciet gevraagd
+    door de praktijkhouder."""
+    employee = get_employee_for_current_user()
+    if not employee:
+        return jsonify({"ok": False, "error": "Geen medewerker gekoppeld aan dit account."}), 403
+    record = next((r for r in load_credentials() if r.get("id") == credential_id), None)
+    if not record or employee["id"] not in record.get("linked_employee_ids", []):
+        return jsonify({"ok": False, "error": "Niet gevonden"}), 404
+    log_action("credential_revealed_self", detail=record.get("service", ""), target=credential_id)
+    return jsonify({"ok": True, "secret": record.get("secret", "")})
 
 
 @app.route("/mijn/uren", methods=["GET","POST"])

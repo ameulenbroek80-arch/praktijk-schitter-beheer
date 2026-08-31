@@ -23,8 +23,6 @@
       <div><dt>Functie</dt><dd>{{ employee.function or '—' }}</dd></div>
       <div><dt>Status</dt><dd>{{ employee.status or '—' }}</dd></div>
       <div><dt>Zakelijk e-mail</dt><dd>{{ employee.work_email or '—' }}</dd></div>
-      <div><dt>Privé e-mail</dt><dd>{{ employee.email or '—' }}</dd></div>
-      <div><dt>Telefoon</dt><dd>{{ employee.phone or '—' }}</dd></div>
       <div><dt>Locatie</dt><dd>{{ employee.work_location or '—' }}</dd></div>
       {% if module_enabled('hr_employment') %}
       <div><dt>Soort dienstverband</dt><dd>{{ employee.employment_type or '—' }}</dd></div>
@@ -75,7 +73,10 @@
           <td><strong>{{ c.service }}</strong>{% if c.url %}<br><small>{{ c.url }}</small>{% endif %}</td>
           <td>{{ c.secret_type }}<br><small>{{ c.scope }}</small></td>
           <td>{{ c.username or '—' }}</td>
-          <td><span class="secret">••••••••</span></td>
+          <td>
+            <span id="mijn-secret-{{ c.id }}" class="secret">••••••••</span>
+            <button class="reveal-credential" type="button" data-id="{{ c.id }}">Tonen</button>
+          </td>
         </tr>
         {% endfor %}
         </tbody>
@@ -102,4 +103,22 @@
   </div>
   {% endif %}
 </div>
+
+{% if module_enabled('credentials') and employee_credentials %}
+<script>
+const mijnCsrf={{ csrf_token()|tojson }};
+document.querySelectorAll('.reveal-credential').forEach(function(btn){
+  btn.addEventListener('click', async function(){
+    const id=btn.dataset.id, target=document.getElementById('mijn-secret-'+id);
+    if(btn.dataset.open==='1'){
+      target.textContent='••••••••'; btn.textContent='Tonen'; btn.dataset.open='0'; return;
+    }
+    const body=new URLSearchParams({csrf_token:mijnCsrf});
+    const res=await fetch(`/mijn/accounts/${id}/reveal`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+    const data=await res.json();
+    if(data.ok){target.textContent=data.secret||'(leeg)';btn.textContent='Verbergen';btn.dataset.open='1';}
+  });
+});
+</script>
+{% endif %}
 {% endblock %}
