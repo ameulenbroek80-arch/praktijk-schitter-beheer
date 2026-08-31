@@ -7,7 +7,7 @@ from pathlib import Path
 from jinja2 import Environment
 
 BASE_DIR = Path(__file__).resolve().parent
-EXPECTED_VERSION = "2.6.2"
+EXPECTED_VERSION = "2.7.0"
 
 errors = []
 warnings = []

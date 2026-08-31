@@ -112,7 +112,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.6.2"
+APP_VERSION = "2.7.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -6156,8 +6156,32 @@ def employee_portal():
             total_recent_hours += float(item.get("hours") or 0)
         except ValueError:
             pass
-    return render_template("employee_portal.html", employee=employee, entries=entries[:8],
-                           requests=requests[:8], balance=balance, total_recent_hours=total_recent_hours)
+
+    # Eigen accounts & codes: alleen metadata, nooit het geheim zelf (zelfde
+    # regel als overal elders in de app - reveal blijft strikt beheerder-only).
+    employee_credentials = []
+    if module_enabled("credentials"):
+        employee_credentials = [
+            c for c in load_credentials()
+            if employee["id"] in c.get("linked_employee_ids", [])
+        ]
+        employee_credentials.sort(key=lambda c: (c.get("service") or "").lower())
+
+    # Eigen registraties: hergebruikt _search_registrations() zodat de
+    # status/dagen-resterend-berekening op precies één plek blijft staan.
+    employee_registrations = []
+    if module_enabled("registrations"):
+        employee_registrations = [
+            r for r in _search_registrations()
+            if r.get("employee_id") == employee["id"]
+        ]
+        employee_registrations.sort(key=lambda r: r.get("expires_at") or "9999-12-31")
+
+    return render_template(
+        "employee_portal.html", employee=employee, entries=entries[:8],
+        requests=requests[:8], balance=balance, total_recent_hours=total_recent_hours,
+        employee_credentials=employee_credentials, employee_registrations=employee_registrations,
+    )
 
 
 @app.route("/mijn/uren", methods=["GET","POST"])

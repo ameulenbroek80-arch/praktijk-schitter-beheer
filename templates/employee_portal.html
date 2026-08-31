@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block page_title %}Mijn overzicht{% endblock %}
-{% block page_subtitle %}Welkom, {{ employee.first_name }}. Hier zie je je uren en verlof.{% endblock %}
+{% block page_subtitle %}Welkom, {{ employee.first_name }}. Hier zie je je eigen gegevens.{% endblock %}
 {% block content %}
 <div class="detail-header card">
   <div class="profile-head">
@@ -15,20 +15,91 @@
     </div>
   </div>
 </div>
+
+<div class="detail-grid">
+  <div class="card">
+    <div class="card-header"><div><h2>Mijn gegevens</h2><p>Persoonlijke en dienstverbandgegevens</p></div></div>
+    <dl class="details-list wide">
+      <div><dt>Functie</dt><dd>{{ employee.function or '—' }}</dd></div>
+      <div><dt>Status</dt><dd>{{ employee.status or '—' }}</dd></div>
+      <div><dt>Zakelijk e-mail</dt><dd>{{ employee.work_email or '—' }}</dd></div>
+      <div><dt>Privé e-mail</dt><dd>{{ employee.email or '—' }}</dd></div>
+      <div><dt>Telefoon</dt><dd>{{ employee.phone or '—' }}</dd></div>
+      <div><dt>Locatie</dt><dd>{{ employee.work_location or '—' }}</dd></div>
+      {% if module_enabled('hr_employment') %}
+      <div><dt>Soort dienstverband</dt><dd>{{ employee.employment_type or '—' }}</dd></div>
+      <div><dt>In dienst sinds</dt><dd>{{ employee.start_date or '—' }}</dd></div>
+      <div><dt>Einddatum contract</dt><dd>{{ employee.contract_end or 'Onbepaalde tijd / niet ingevuld' }}</dd></div>
+      <div><dt>Leidinggevende</dt><dd>{{ employee.manager or '—' }}</dd></div>
+      {% endif %}
+    </dl>
+  </div>
+</div>
+
+{% if module_enabled('hours') or module_enabled('leave') %}
 <section class="stats-grid employee-stats">
+  {% if module_enabled('hours') %}
   <div class="stat-card teal"><div class="stat-icon">🕒</div><div><strong>{{ '%.1f'|format(total_recent_hours) }}</strong><span>Recente urenregels</span><small>Bekijk je urenregistratie</small></div></div>
+  {% endif %}
+  {% if module_enabled('leave') %}
   <div class="stat-card pink"><div class="stat-icon">🌴</div><div><strong>{{ '%.1f'|format(balance.remaining) }}</strong><span>Verlof beschikbaar</span><small>uren resterend</small></div></div>
   <div class="stat-card aqua"><div class="stat-icon">✓</div><div><strong>{{ '%.1f'|format(balance.approved) }}</strong><span>Goedgekeurd verlof</span><small>uren</small></div></div>
   <div class="stat-card gold"><div class="stat-icon">…</div><div><strong>{{ '%.1f'|format(balance.pending) }}</strong><span>In behandeling</span><small>uren aangevraagd</small></div></div>
+  {% endif %}
 </section>
+{% endif %}
+
 <div class="detail-grid">
+  {% if module_enabled('hours') %}
   <div class="card">
-    <div class="card-header"><div><h2>Mijn uren</h2><p>Laatste registraties</p></div>{% if module_enabled('hours') %}<a class="btn primary" href="{{ url_for('my_hours') }}">Uren registreren</a>{% endif %}</div>
+    <div class="card-header"><div><h2>Mijn uren</h2><p>Laatste registraties</p></div><a class="btn primary" href="{{ url_for('my_hours') }}">Uren registreren</a></div>
     {% if entries %}<div class="record-list">{% for e in entries %}<div class="record-row"><div><strong>{{ e.date }}</strong><span>{{ e.category }}</span></div><div>{{ e.hours }} uur</div><div>{{ e.description }}</div></div>{% endfor %}</div>{% else %}<div class="compact-empty">Nog geen uren geregistreerd.</div>{% endif %}
   </div>
+  {% endif %}
+  {% if module_enabled('leave') %}
   <div class="card">
-    <div class="card-header"><div><h2>Mijn verlof</h2><p>Laatste aanvragen</p></div>{% if module_enabled('leave') %}<a class="btn primary" href="{{ url_for('my_leave') }}">Verlof aanvragen</a>{% endif %}</div>
+    <div class="card-header"><div><h2>Mijn verlof</h2><p>Laatste aanvragen</p></div><a class="btn primary" href="{{ url_for('my_leave') }}">Verlof aanvragen</a></div>
     {% if requests %}<div class="record-list">{% for r in requests %}<div class="record-row"><div><strong>{{ r.start_date }}{% if r.end_date %} t/m {{ r.end_date }}{% endif %}</strong><span>{{ r.status }}</span></div><div>{{ r.hours }} uur</div></div>{% endfor %}</div>{% else %}<div class="compact-empty">Nog geen verlofaanvragen.</div>{% endif %}
   </div>
+  {% endif %}
+  {% if module_enabled('credentials') %}
+  <div class="card">
+    <div class="card-header"><div><h2>Mijn accounts &amp; codes</h2><p>Alleen ter inzage; het geheim zelf is niet zichtbaar</p></div></div>
+    {% if employee_credentials %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Dienst</th><th>Type</th><th>Gebruikersnaam</th><th>Geheim</th></tr></thead>
+        <tbody>
+        {% for c in employee_credentials %}
+        <tr>
+          <td><strong>{{ c.service }}</strong>{% if c.url %}<br><small>{{ c.url }}</small>{% endif %}</td>
+          <td>{{ c.secret_type }}<br><small>{{ c.scope }}</small></td>
+          <td>{{ c.username or '—' }}</td>
+          <td><span class="secret">••••••••</span></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="compact-empty">Geen accounts of codes aan jou gekoppeld.</div>{% endif %}
+  </div>
+  {% endif %}
+  {% if module_enabled('registrations') %}
+  <div class="card">
+    <div class="card-header"><div><h2>Mijn registraties</h2><p>SKJ, NVO, VOG, BHV en overige</p></div></div>
+    {% if employee_registrations %}
+    <div class="record-list">
+      {% for r in employee_registrations %}
+      <div class="record-row">
+        <div><strong>{{ r.type }}</strong><span>{{ r.institution or 'Geen instantie ingevuld' }}</span></div>
+        <div>{{ r.number or '—' }}</div>
+        <div><span class="registration-status reg-{{ r.display_status|lower|replace(' ','-') }}">{{ r.display_status }}</span></div>
+        <div>{{ r.expires_at or 'Geen einddatum' }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<div class="compact-empty">Nog geen registraties vastgelegd.</div>{% endif %}
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
