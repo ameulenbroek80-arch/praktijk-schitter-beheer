@@ -3,6 +3,16 @@
 {% block page_title %}Zoekresultaten{% endblock %}
 {% block page_subtitle %}Alle doorzoekbare onderdelen voor "{{ query }}".{% endblock %}
 {% block content %}
+{% if direct_answer %}
+<div class="card">
+  <div class="card-header">
+    <div><h2>Antwoord</h2></div>
+  </div>
+  <div class="ai-suggestion-block">
+    {% for line in direct_answer %}<p>{{ line }}</p>{% endfor %}
+  </div>
+</div>
+{% endif %}
 <div class="card">
   <div class="card-header">
     <div><h2>Gevonden per onderdeel</h2><p>Trefwoord: {{ search_term or "(geen)" }}</p></div>

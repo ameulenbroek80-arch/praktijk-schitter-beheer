@@ -112,7 +112,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.5.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -4586,6 +4586,122 @@ def _run_ai_search(term: str) -> list[dict]:
     return categories
 
 
+_REGISTRATION_STATUS_LABELS = {
+    "verlopen": "Verlopen",
+    "loopt_af": "Loopt af",
+    "actief": "Actief",
+}
+_ASSET_STATUS_LABELS = {
+    "uitgegeven": "Uitgegeven",
+    "vrij": "Vrij",
+}
+
+
+def _resolve_employee_matches(employee_name: str) -> list[dict]:
+    """Zoekt medewerkers op (deel van de) naam voor een feitelijke data-vraag. Geeft
+    een lijst terug: leeg (niemand gevonden), precies één (eenduidig), of meerdere
+    (te vaag om automatisch te beantwoorden - de aanroeper moet dat dan als zodanig
+    melden in plaats van te gokken welke medewerker bedoeld is)."""
+    employee_name = (employee_name or "").strip()
+    if not employee_name:
+        return []
+    exact = _find_employee_by_exact_name(employee_name)
+    if exact:
+        return [exact]
+    term = employee_name.lower()
+    matches = []
+    seen_ids = set()
+    for e in [normalize_employee(x) for x in load_employees()]:
+        full = f"{e.get('first_name','')} {e.get('last_name','')}".strip().lower()
+        if term and term in full and e.get("id") not in seen_ids:
+            matches.append(e)
+            seen_ids.add(e.get("id"))
+    return matches
+
+
+def _resolve_data_question(employee_name: str, subject_term: str, status_hint: str) -> list[str]:
+    """Beantwoordt een feitelijke vraag over bestaande registraties en/of
+    bedrijfsmiddelen UITSLUITEND met echte, op dit moment opgeslagen gegevens. De AI
+    (via extract_assistant_intent) wordt alleen gebruikt om te herkennen WAT er
+    gevraagd wordt (welke medewerker/welk type/welke status) - nooit om het
+    antwoord zelf te verzinnen; elk feit in het antwoord komt rechtstreeks uit
+    load_registrations()/load_assets(). Geeft altijd een niet-lege lijst tekstregels
+    terug: bij geen (eenduidige) match wordt dat expliciet en eerlijk gemeld in
+    plaats van te gokken."""
+    status_hint = status_hint if status_hint in _DATA_QUESTION_STATUS_HINTS else ""
+    employee_name = (employee_name or "").strip()
+    subject_term = (subject_term or "").strip()
+
+    employees = _resolve_employee_matches(employee_name) if employee_name else []
+    if employee_name and not employees:
+        return [f"Geen medewerker gevonden die overeenkomt met \u201c{employee_name}\u201d."]
+    if employee_name and len(employees) > 1:
+        names = ", ".join(f"{e.get('first_name','')} {e.get('last_name','')}".strip() for e in employees)
+        return [
+            f"Meerdere medewerkers komen overeen met \u201c{employee_name}\u201d ({names}) - "
+            "noem de volledige naam voor een eenduidig antwoord."
+        ]
+    employee = employees[0] if employees else None
+
+    if not subject_term and not status_hint:
+        return [
+            "De vraag is niet specifiek genoeg om automatisch te beantwoorden - noem het type "
+            "registratie (zoals VOG of BHV) of bedrijfsmiddel waar het om gaat."
+        ]
+
+    lines = []
+
+    if module_enabled("registrations"):
+        reg_rows = _search_registrations("")
+        if employee:
+            reg_rows = [r for r in reg_rows if r.get("employee_id") == employee.get("id")]
+        if subject_term:
+            term = subject_term.lower()
+            reg_rows = [r for r in reg_rows if term in (r.get("type") or "").lower()]
+        if status_hint in _REGISTRATION_STATUS_LABELS:
+            wanted = _REGISTRATION_STATUS_LABELS[status_hint]
+            reg_rows = [r for r in reg_rows if r.get("display_status") == wanted]
+        if subject_term or status_hint:
+            for r in sorted(
+                reg_rows, key=lambda r: (r.get("employee_name", "").lower(), r.get("expires_at") or "9999-12-31")
+            ):
+                when = f"loopt af op {r['expires_at']}" if r.get("expires_at") else "heeft geen vervaldatum geregistreerd"
+                lines.append(
+                    f"{r.get('type','')} van {r.get('employee_name','')}: {when} (status: {r.get('display_status','')})."
+                )
+
+    if module_enabled("assets"):
+        asset_rows = _search_assets("")
+        if employee:
+            asset_rows = [a for a in asset_rows if a.get("assigned_employee_id") == employee.get("id")]
+        if subject_term:
+            term = subject_term.lower()
+            asset_rows = [
+                a
+                for a in asset_rows
+                if term in " ".join([a.get("category", ""), a.get("name", ""), a.get("brand", ""), a.get("model", "")]).lower()
+            ]
+        if status_hint in _ASSET_STATUS_LABELS:
+            wanted = _ASSET_STATUS_LABELS[status_hint]
+            asset_rows = [a for a in asset_rows if a.get("status") == wanted]
+        elif not status_hint:
+            # Bij een vraag als 'wie heeft er nog een telefoon' zonder expliciete status is
+            # 'Uitgegeven' de zinvolle default - alleen bedrijfsmiddelen die daadwerkelijk bij
+            # iemand in gebruik zijn beantwoorden die vraag zonder ruis van vrije exemplaren.
+            asset_rows = [a for a in asset_rows if a.get("status") == "Uitgegeven"]
+        if subject_term or status_hint:
+            for a in sorted(asset_rows, key=lambda a: (a.get("employee_name", "").lower(), a.get("name", "").lower())):
+                who = a.get("employee_name") or "(niet toegewezen)"
+                lines.append(f"{a.get('name','')} ({a.get('category','')}): {who} - status {a.get('status','')}.")
+
+    if not lines:
+        subject_desc = subject_term or "de gevraagde gegevens"
+        who_desc = f" voor {employee.get('first_name','')} {employee.get('last_name','')}".strip() if employee else ""
+        lines.append(f"Geen gegevens gevonden die overeenkomen met \u201c{subject_desc}\u201d{who_desc}.")
+
+    return lines
+
+
 _SEARCH_FILLER_PATTERNS = [
     re.compile(r"^zoek(?:\s+naar)?\s+", re.IGNORECASE),
     re.compile(r"^wachtwoord(?:en)?\s+van\s+", re.IGNORECASE),
@@ -4649,23 +4765,35 @@ def extract_search_intent(query: str) -> tuple[dict | None, str | None]:
     return {"search_term": search_term}, None
 
 
+_DATA_QUESTION_STATUS_HINTS = {"verlopen", "loopt_af", "actief", "uitgegeven", "vrij"}
+
+
 def extract_assistant_intent(prompt: str) -> tuple[dict | None, str | None]:
     """Laat een taalmodel een vrije tekstopdracht voor de centrale AI-assistent
-    classificeren in een van de bestaande proeffuncties. Geeft nooit meer terug dan
-    WELKE bestaande functie waarschijnlijk bedoeld wordt (plus, voor zoeken, hetzelfde
-    zoekdoel/trefwoord als extract_search_intent) - de daadwerkelijke uitvoering
-    gebeurt altijd via de bestaande, al geteste routes/formulieren."""
+    classificeren in een van de bestaande proeffuncties, of in de nieuwe capability
+    'data_question' (een feitelijke vraag over bestaande gegevens, zoals een
+    vervaldatum of wie een bedrijfsmiddel heeft). Geeft nooit meer terug dan WELKE
+    functie waarschijnlijk bedoeld wordt en, waar relevant, de losse zoekbouwstenen
+    (search_term / employee_name / subject_term / status_hint) - het daadwerkelijke
+    antwoord wordt nooit door de AI zelf geformuleerd, maar altijd door de app
+    berekend uit de echte, actuele opgeslagen gegevens (zie _resolve_data_question)."""
     prompt = (prompt or "").strip()
     if not prompt:
         return None, "Typ eerst een opdracht of vraag."
 
     system_prompt = (
         "Je bepaalt welke van een vaste set functies in een Nederlandstalig personeelssysteem "
-        "een gebruiker bedoelt met zijn getypte opdracht. Er zijn precies vijf mogelijke "
+        "een gebruiker bedoelt met zijn getypte opdracht. Er zijn precies zes mogelijke "
         "capabilities: 'search' (iets opzoeken: een medewerker, een registratie zoals VOG of "
         "SKJ, een bedrijfsmiddel, een account/wachtwoord/inlog/code, of een document - bij "
         "'search' doorzoekt de app zelf altijd alle doorzoekbare onderdelen tegelijk, dus je "
-        "hoeft niet te kiezen waar precies gezocht wordt), 'employee_intake' (een NIEUWE "
+        "hoeft niet te kiezen waar precies gezocht wordt), "
+        "'data_question' (een feitelijke vraag die een concreet antwoord verdient over "
+        "BESTAANDE gegevens, bijvoorbeeld een vervaldatum van een registratie zoals "
+        "VOG/BHV/SKJ, of wie een bepaald bedrijfsmiddel zoals een telefoon of laptop in "
+        "gebruik heeft - gebruik dit ALLEEN als de gebruiker echt een antwoord wil weten, "
+        "niet als hij iets wil aanmaken, wijzigen of alleen browsen), "
+        "'employee_intake' (een NIEUWE "
         "medewerker aanmaken/invoeren op basis van geplakte tekst zoals een intake-e-mail met "
         "naam, adres, functiegegevens), "
         "'asset_intake' (een NIEUW bedrijfsmiddel aanmaken/invoeren op basis van geplakte "
@@ -4675,11 +4803,17 @@ def extract_assistant_intent(prompt: str) -> tuple[dict | None, str | None]:
         "Actiecentrum), of 'unclear' als geen van deze duidelijk van toepassing is. Antwoord "
         "UITSLUITEND met geldige JSON, zonder toelichting en zonder markdown-codeblok, in exact "
         "deze vorm: "
-        '{"capability": "search", "search_term": ""}\n'
+        '{"capability": "search", "search_term": "", "employee_name": "", "subject_term": "", "status_hint": ""}\n'
         "Vul 'search_term' alleen zinvol in als capability 'search' is: het kernbegrip om op te "
         "zoeken (bijvoorbeeld een naam of registratiesoort), zonder woorden als 'wachtwoord van' "
-        "of 'zoek'. Voor de andere capabilities mag 'search_term' leeg zijn. Verzin nooit namen "
-        "die niet in de opdracht zelf staan."
+        "of 'zoek'. Vul bij 'data_question' 'employee_name' in met de naam van de medewerker "
+        "als die genoemd wordt (anders leeg), 'subject_term' met het type registratie of "
+        "bedrijfsmiddel waar de vraag over gaat (bijvoorbeeld 'VOG', 'BHV', 'telefoon' - "
+        "alleen het kernbegrip zelf, geen hele zin), en 'status_hint' UITSLUITEND met een van "
+        "deze exacte waarden als die van toepassing is: 'verlopen', 'loopt_af', 'actief', "
+        "'uitgegeven', 'vrij' (anders leeg laten). Voor de andere capabilities mogen deze "
+        "vier velden leeg blijven. Verzin nooit namen, typen of waarden die niet in de "
+        "opdracht zelf staan of er duidelijk uit volgen."
     )
     text, err = _dispatch_ai_call(system_prompt, prompt)
     if err:
@@ -4694,11 +4828,22 @@ def extract_assistant_intent(prompt: str) -> tuple[dict | None, str | None]:
         return None, "AI-antwoord had niet de verwachte vorm. Probeer het anders te formuleren."
 
     capability = str(parsed.get("capability", "") or "").strip().lower()
-    if capability not in ("search", "employee_intake", "actions_summary", "asset_intake"):
+    if capability not in ("search", "employee_intake", "actions_summary", "asset_intake", "data_question"):
         capability = "unclear"
     search_term = str(parsed.get("search_term", "") or "").strip()[:100]
+    employee_name = str(parsed.get("employee_name", "") or "").strip()[:100]
+    subject_term = str(parsed.get("subject_term", "") or "").strip()[:100]
+    status_hint = str(parsed.get("status_hint", "") or "").strip().lower()
+    if status_hint not in _DATA_QUESTION_STATUS_HINTS:
+        status_hint = ""
 
-    return {"capability": capability, "search_term": search_term}, None
+    return {
+        "capability": capability,
+        "search_term": search_term,
+        "employee_name": employee_name,
+        "subject_term": subject_term,
+        "status_hint": status_hint,
+    }, None
 
 
 _EMPLOYEE_INTAKE_LOCAL_RE = re.compile(r"^\s*nieuwe\s+medewerker\s*:\s*", re.IGNORECASE)
@@ -4807,6 +4952,16 @@ def ai_assistant():
             categories = _run_ai_search(term)
             return render_template("ai_search_results.html", query=prompt, search_term=term,
                                    categories=categories)
+
+        if capability == "data_question":
+            employee_name = intent.get("employee_name", "")
+            subject_term = intent.get("subject_term", "")
+            status_hint = intent.get("status_hint", "")
+            direct_answer = _resolve_data_question(employee_name, subject_term, status_hint)
+            term = subject_term or employee_name
+            categories = _run_ai_search(term) if term else []
+            return render_template("ai_search_results.html", query=prompt, search_term=term,
+                                   categories=categories, direct_answer=direct_answer)
 
         if capability == "employee_intake":
             t = _ai_intake_store({"raw_text": prompt})
