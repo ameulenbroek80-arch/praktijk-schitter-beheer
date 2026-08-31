@@ -99,7 +99,7 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -3831,26 +3831,49 @@ def collect_action_items():
     return items
 
 
-# ---------- AI-samenvatting (proeffunctie) ----------
+# ---------- AI-assistent: Groq (primair) met Gemini als fallback (proeffunctie) ----------
 #
-# Test-only integratie: vat de al-verzamelde actiepunten hierboven samen in
-# gewone taal. Stuurt UITSLUITEND gestructureerde, niet-gevoelige velden die
-# hierboven al zichtbaar zijn (titel, toelichting, bron, datum, urgentie) —
-# geen geheimen uit de Accounts & codes-kluis, geen documentinhoud. Alleen
-# actief met een expliciet ingestelde SCHITTER_AI_API_KEY (zie .env.example),
-# precies zoals SCHITTER_SESSION_SECRET/SCHITTER_SETUP_CODE al werken.
-# Ondersteunt Gemini (standaard) en OpenAI, instelbaar via SCHITTER_AI_PROVIDER.
+# Test-only integratie: de gebruiker kiest nergens in de app een AI-provider. Alle
+# AI-proeffuncties in dit bestand lopen via _dispatch_ai_call() hieronder, die zelf
+# eerst Groq probeert (GROQ_API_KEY) en alleen bij een duidelijke quota/rate-limit-
+# fout (HTTP 429) hetzelfde verzoek eenmalig via Gemini probeert (GEMINI_API_KEY).
+# Andere fouten (ontbrekende/ongeldige sleutel, ongeldig verzoek, netwerk- of
+# parsingfout) schakelen NIET automatisch over - die moeten worden opgelost, anders
+# kunnen ze onopgemerkt blijven achter een toevallig werkende Gemini-aanroep. Zijn
+# beide diensten hun gratis quotum kwijt, dan komt er één duidelijke, niet-technische
+# melding - de rest van de app blijft gewoon werken.
 #
-# Beoordeel dit eerst lokaal met verzonnen testmedewerkers voordat dit ooit
-# bij echte praktijkgegevens in de buurt komt.
+# Sleutels komen UITSLUITEND uit environment variables (GROQ_API_KEY, GEMINI_API_KEY)
+# - nooit opgeslagen in broncode, Git, storage of templates (zie .env.example).
+#
+# Beoordeel dit eerst lokaal met verzonnen testmedewerkers voordat dit ooit bij
+# echte praktijkgegevens in de buurt komt.
+
+GROQ_MODEL = "qwen/qwen3.8-27b"  # centraal instelbaar - hier wijzigen voor een ander Groq-model
+GEMINI_MODEL = "gemini-2.5-flash"
+
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+AI_BOTH_PROVIDERS_QUOTA_MSG = (
+    "AI-assistent tijdelijk niet beschikbaar: de gratis gebruikslimiet van beide "
+    "AI-diensten (Groq en Gemini) is bereikt. Probeer het later opnieuw."
+)
+
 
 def _ai_configured() -> bool:
-    return bool(os.environ.get("SCHITTER_AI_API_KEY", "").strip())
+    return bool(os.environ.get("GROQ_API_KEY", "").strip()) or bool(os.environ.get("GEMINI_API_KEY", "").strip())
 
 
-def _call_openai(api_key: str, model: str, system_prompt: str, user_prompt: str) -> tuple[str | None, str | None]:
+def _call_groq(system_prompt: str, user_prompt: str) -> tuple[str | None, str | None, bool]:
+    """Roept Groq aan. Geeft (tekst, foutmelding, quota_bereikt) terug. quota_bereikt
+    is alleen True bij een HTTP 429 (rate limit/gratis quotum) - de enige fout die
+    _dispatch_ai_call automatisch naar Gemini mag laten overschakelen."""
+    api_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if not api_key:
+        return None, "AI is niet beschikbaar: GROQ_API_KEY ontbreekt. Stel deze environment variable in (zie .env.example).", False
+
     payload = json.dumps({
-        "model": model,
+        "model": GROQ_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -3860,7 +3883,7 @@ def _call_openai(api_key: str, model: str, system_prompt: str, user_prompt: str)
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
+        GROQ_API_URL,
         data=payload,
         headers={
             "Authorization": f"Bearer {api_key}",
@@ -3871,27 +3894,35 @@ def _call_openai(api_key: str, model: str, system_prompt: str, user_prompt: str)
     try:
         with urllib.request.urlopen(req, timeout=25) as resp:
             body = json.loads(resp.read().decode("utf-8"))
-        return body["choices"][0]["message"]["content"].strip(), None
+        return body["choices"][0]["message"]["content"].strip(), None, False
     except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            return None, "quota", True
         try:
             detail = json.loads(exc.read().decode("utf-8")).get("error", {}).get("message", "")
         except Exception:
             detail = ""
-        return None, f"AI-aanroep (OpenAI) mislukt ({exc.code}). {detail}".strip()
+        return None, f"AI-aanroep (Groq) mislukt ({exc.code}). {detail}".strip(), False
     except urllib.error.URLError as exc:
-        return None, f"Geen verbinding met de AI-dienst: {exc.reason}"
+        return None, f"Geen verbinding met de AI-dienst (Groq): {exc.reason}", False
     except Exception as exc:
-        return None, f"Onverwachte fout bij AI-samenvatting: {exc}"
+        return None, f"Onverwachte fout bij AI-aanroep (Groq): {exc}", False
 
 
-def _call_gemini(api_key: str, model: str, system_prompt: str, user_prompt: str) -> tuple[str | None, str | None]:
+def _call_gemini(system_prompt: str, user_prompt: str) -> tuple[str | None, str | None, bool]:
+    """Roept Gemini aan (fallback). Geeft (tekst, foutmelding, quota_bereikt) terug,
+    naar analogie van _call_groq()."""
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return None, "AI is niet beschikbaar: GEMINI_API_KEY ontbreekt. Stel deze environment variable in (zie .env.example).", False
+
     payload = json.dumps({
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
         "systemInstruction": {"parts": [{"text": system_prompt}]},
         "generationConfig": {"temperature": 0.4, "maxOutputTokens": 400},
     }).encode("utf-8")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{quote(model)}:generateContent"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{quote(GEMINI_MODEL)}:generateContent"
     req = urllib.request.Request(
         url,
         data=payload,
@@ -3908,46 +3939,48 @@ def _call_gemini(api_key: str, model: str, system_prompt: str, user_prompt: str)
         if not candidates:
             block_reason = (body.get("promptFeedback") or {}).get("blockReason")
             if block_reason:
-                return None, f"Gemini heeft het verzoek geblokkeerd ({block_reason})."
-            return None, "Gemini gaf geen antwoord terug."
+                return None, f"Gemini heeft het verzoek geblokkeerd ({block_reason}).", False
+            return None, "Gemini gaf geen antwoord terug.", False
         parts = candidates[0].get("content", {}).get("parts", [])
         text = "".join(p.get("text", "") for p in parts).strip()
         if not text:
-            return None, "Gemini gaf een leeg antwoord terug."
-        return text, None
+            return None, "Gemini gaf een leeg antwoord terug.", False
+        return text, None, False
     except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            return None, "quota", True
         try:
             detail = json.loads(exc.read().decode("utf-8")).get("error", {}).get("message", "")
         except Exception:
             detail = ""
-        return None, f"AI-aanroep (Gemini) mislukt ({exc.code}). {detail}".strip()
+        return None, f"AI-aanroep (Gemini) mislukt ({exc.code}). {detail}".strip(), False
     except urllib.error.URLError as exc:
-        return None, f"Geen verbinding met de AI-dienst: {exc.reason}"
+        return None, f"Geen verbinding met de AI-dienst (Gemini): {exc.reason}", False
     except Exception as exc:
-        return None, f"Onverwachte fout bij AI-samenvatting: {exc}"
+        return None, f"Onverwachte fout bij AI-aanroep (Gemini): {exc}", False
 
 
-def _dispatch_ai_call(api_key: str, system_prompt: str, user_prompt: str) -> tuple[str | None, str | None]:
-    """Kiest de AI-provider (SCHITTER_AI_PROVIDER, standaard 'gemini') en het bijbehorende
-    standaardmodel (SCHITTER_AI_MODEL overschrijft dit), en doet de daadwerkelijke aanroep.
-    Gedeeld door alle AI-proeffuncties in dit bestand."""
-    provider = (os.environ.get("SCHITTER_AI_PROVIDER", "gemini").strip().lower() or "gemini")
-    if provider not in ("gemini", "openai"):
-        return None, f"Onbekende SCHITTER_AI_PROVIDER '{provider}' (verwacht 'gemini' of 'openai')."
-    if provider == "openai":
-        model = os.environ.get("SCHITTER_AI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
-        return _call_openai(api_key, model, system_prompt, user_prompt)
-    model = os.environ.get("SCHITTER_AI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
-    return _call_gemini(api_key, model, system_prompt, user_prompt)
+def _dispatch_ai_call(system_prompt: str, user_prompt: str) -> tuple[str | None, str | None]:
+    """Centrale AI-aanroep, gedeeld door alle AI-proeffuncties in dit bestand. Groq is
+    de vaste primaire provider; alleen bij een 429/quota-fout van Groq wordt hetzelfde
+    verzoek eenmalig via Gemini geprobeerd. De gebruiker kiest hier nergens een
+    provider - die keuze ligt vast (Groq -> Gemini -> foutmelding). Logt UITSLUITEND
+    welke provider gebruikt is en waarom (nooit de prompt zelf of sleutels)."""
+    text, err, groq_quota = _call_groq(system_prompt, user_prompt)
+    if not groq_quota:
+        app.logger.info("AI provider=groq")
+        return text, err
+
+    app.logger.info("AI provider=gemini fallback_reason=rate_limit")
+    text, err, gemini_quota = _call_gemini(system_prompt, user_prompt)
+    if gemini_quota:
+        return None, AI_BOTH_PROVIDERS_QUOTA_MSG
+    return text, err
 
 
 def generate_ai_action_summary(items: list[dict]) -> tuple[str | None, str | None]:
     """Laat een taalmodel de actiepuntenlijst samenvatten. Geeft (tekst, fout) terug,
     naar analogie van send_email(): nooit een exception laten opborrelen naar de route."""
-    api_key = os.environ.get("SCHITTER_AI_API_KEY", "").strip()
-    if not api_key:
-        return None, "Stel SCHITTER_AI_API_KEY in (zie .env.example) om deze proeffunctie te gebruiken."
-
     if not items:
         return "Geen openstaande acties op dit moment. Niets om samen te vatten.", None
 
@@ -3974,7 +4007,7 @@ def generate_ai_action_summary(items: list[dict]) -> tuple[str | None, str | Non
         "woorden, gewone lopende tekst zonder opsomming met streepjes."
     )
     user_prompt = f"Openstaande acties ({len(items)} totaal):\n{lijst_tekst}"
-    return _dispatch_ai_call(api_key, system_prompt, user_prompt)
+    return _dispatch_ai_call(system_prompt, user_prompt)
 
 
 def _fallback_action_summary(items: list[dict]) -> str:
@@ -4063,10 +4096,6 @@ def extract_employee_intake(raw_text: str) -> tuple[dict | None, str | None]:
     """Laat een taalmodel vrije tekst omzetten in een concept-medewerker + concept-
     registraties. Geeft ({"employee": {...}, "registrations": [...]}, None) of
     (None, foutmelding) terug - nooit een exception naar de route."""
-    api_key = os.environ.get("SCHITTER_AI_API_KEY", "").strip()
-    if not api_key:
-        return None, "Stel SCHITTER_AI_API_KEY in (zie .env.example) om deze proeffunctie te gebruiken."
-
     raw_text = (raw_text or "").strip()
     if not raw_text:
         return None, "Plak eerst een tekst met de gegevens van de nieuwe medewerker."
@@ -4090,7 +4119,7 @@ def extract_employee_intake(raw_text: str) -> tuple[dict | None, str | None]:
         "korte, herkenbare naam zoals 'VOG', 'SKJ-registratie', 'BIG-registratie', 'Diploma' "
         "of 'BHV' als dat past, anders een korte eigen omschrijving uit de tekst zelf."
     )
-    text, err = _dispatch_ai_call(api_key, system_prompt, raw_text)
+    text, err = _dispatch_ai_call(system_prompt, raw_text)
     if err:
         return None, err
 
@@ -4144,10 +4173,6 @@ def extract_asset_intake(raw_text: str) -> tuple[dict | None, str | None]:
     ({"asset": {...}}, None) of (None, foutmelding) terug - nooit een exception naar
     de route. Vult nooit een assets-record rechtstreeks; het concept komt terecht in
     het bestaande, al gevalideerde aanmaakformulier op de bedrijfsmiddelenpagina."""
-    api_key = os.environ.get("SCHITTER_AI_API_KEY", "").strip()
-    if not api_key:
-        return None, "Stel SCHITTER_AI_API_KEY in (zie .env.example) om deze proeffunctie te gebruiken."
-
     raw_text = (raw_text or "").strip()
     if not raw_text:
         return None, "Plak eerst een tekst met de gegevens van het nieuwe bedrijfsmiddel."
@@ -4169,7 +4194,7 @@ def extract_asset_intake(raw_text: str) -> tuple[dict | None, str | None]:
         "'Toegangspas', 'Token' of 'Monitor' als dat past, anders een korte eigen omschrijving "
         "uit de tekst zelf, of 'Overig' als het type niet duidelijk is."
     )
-    text, err = _dispatch_ai_call(api_key, system_prompt, raw_text)
+    text, err = _dispatch_ai_call(system_prompt, raw_text)
     if err:
         return None, err
 
@@ -4273,10 +4298,6 @@ def extract_search_intent(query: str) -> tuple[dict | None, str | None]:
     ({"search_term": ...}, None) of (None, foutmelding) terug - nooit een exception
     naar de route. Kiest zelf geen register meer: de route doorzoekt het trefwoord
     altijd in alle doorzoekbare registers tegelijk via _run_ai_search()."""
-    api_key = os.environ.get("SCHITTER_AI_API_KEY", "").strip()
-    if not api_key:
-        return None, "Stel SCHITTER_AI_API_KEY in (zie .env.example) om deze proeffunctie te gebruiken."
-
     query = (query or "").strip()
     if not query:
         return None, "Typ eerst een zoekvraag."
@@ -4291,7 +4312,7 @@ def extract_search_intent(query: str) -> tuple[dict | None, str | None]:
         "laat woorden als 'wachtwoord van', 'document van' of 'zoek' weg als de rest van de vraag "
         "dat al aangeeft. Verzin nooit namen die niet in de vraag zelf staan."
     )
-    text, err = _dispatch_ai_call(api_key, system_prompt, query)
+    text, err = _dispatch_ai_call(system_prompt, query)
     if err:
         return None, err
 
@@ -4314,10 +4335,6 @@ def extract_assistant_intent(prompt: str) -> tuple[dict | None, str | None]:
     WELKE bestaande functie waarschijnlijk bedoeld wordt (plus, voor zoeken, hetzelfde
     zoekdoel/trefwoord als extract_search_intent) - de daadwerkelijke uitvoering
     gebeurt altijd via de bestaande, al geteste routes/formulieren."""
-    api_key = os.environ.get("SCHITTER_AI_API_KEY", "").strip()
-    if not api_key:
-        return None, "Stel SCHITTER_AI_API_KEY in (zie .env.example) om deze proeffunctie te gebruiken."
-
     prompt = (prompt or "").strip()
     if not prompt:
         return None, "Typ eerst een opdracht of vraag."
@@ -4344,7 +4361,7 @@ def extract_assistant_intent(prompt: str) -> tuple[dict | None, str | None]:
         "of 'zoek'. Voor de andere capabilities mag 'search_term' leeg zijn. Verzin nooit namen "
         "die niet in de opdracht zelf staan."
     )
-    text, err = _dispatch_ai_call(api_key, system_prompt, prompt)
+    text, err = _dispatch_ai_call(system_prompt, prompt)
     if err:
         return None, err
 
@@ -4364,6 +4381,52 @@ def extract_assistant_intent(prompt: str) -> tuple[dict | None, str | None]:
     return {"capability": capability, "search_term": search_term}, None
 
 
+_EMPLOYEE_INTAKE_LOCAL_RE = re.compile(r"^\s*nieuwe\s+medewerker\s*:\s*", re.IGNORECASE)
+_ASSET_INTAKE_LOCAL_RE = re.compile(r"^\s*nieuw\s+bedrijfsmiddel\s*:\s*", re.IGNORECASE)
+
+
+def _find_employee_by_exact_name(term: str):
+    """Geeft de medewerker terug als 'term' exact (hoofdletterongevoelig) de volledige
+    naam, of de losse voor- of achternaam is van precies één bestaande medewerker -
+    anders None. Gebruikt om een naam-only opdracht in de AI-assistent volledig
+    lokaal (zonder AI-aanroep) af te handelen."""
+    term = (term or "").strip().lower()
+    if not term:
+        return None
+    matched_ids = set()
+    matched_employee = None
+    for e in [normalize_employee(x) for x in load_employees()]:
+        first = (e.get("first_name") or "").strip().lower()
+        last = (e.get("last_name") or "").strip().lower()
+        full = f"{first} {last}".strip()
+        keys = {k for k in (full, first, last) if k}
+        if term in keys:
+            matched_ids.add(e.get("id"))
+            matched_employee = e
+    return matched_employee if len(matched_ids) == 1 else None
+
+
+def _local_assistant_route(prompt: str) -> tuple[str | None, str]:
+    """Herkent een opdracht voor de AI-assistent lokaal, zonder AI-classificatie, in
+    de gevallen waarin dat betrouwbaar kan: een 'nieuwe medewerker: ...'- of 'nieuw
+    bedrijfsmiddel: ...'-opdracht (daarna is nog altijd één AI-aanroep nodig voor de
+    veldextractie), en een zoekopdracht die uit niets anders bestaat dan de volledige
+    naam of losse voor-/achternaam van precies één bestaande medewerker. Geeft
+    (capability, payload) terug, of (None, '') als dit niet eenduidig lokaal te
+    herkennen is - dan mag de bestaande AI-intentherkenning het proberen."""
+    if _EMPLOYEE_INTAKE_LOCAL_RE.match(prompt):
+        return "employee_intake", prompt
+
+    if _ASSET_INTAKE_LOCAL_RE.match(prompt):
+        return "asset_intake", prompt
+
+    matched_employee = _find_employee_by_exact_name(prompt)
+    if matched_employee is not None:
+        return "search", prompt.strip()
+
+    return None, ""
+
+
 @app.route("/assistant", methods=["GET", "POST"])
 @admin_required
 def ai_assistant():
@@ -4376,6 +4439,25 @@ def ai_assistant():
         if not prompt:
             flash("Typ eerst een opdracht of vraag.", "error")
             return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
+
+        local_capability, local_payload = _local_assistant_route(prompt)
+        if local_capability == "employee_intake":
+            log_action("ai_assistant_routed", detail=f"employee_intake (lokaal herkend): {prompt[:80]}")
+            return redirect(url_for("employee_ai_intake", raw_text=prompt))
+
+        if local_capability == "asset_intake":
+            if not module_enabled("assets"):
+                flash("De module Bedrijfsmiddelen staat uit.", "error")
+                return render_template("ai_assistant.html", ai_configured=_ai_configured(), prompt=prompt)
+            log_action("ai_assistant_routed", detail=f"asset_intake (lokaal herkend): {prompt[:80]}")
+            return redirect(url_for("asset_ai_intake", raw_text=prompt))
+
+        if local_capability == "search":
+            term = local_payload
+            log_action("ai_assistant_routed", detail=f"search (lokaal herkend, naam): {term[:80]}")
+            categories = _run_ai_search(term)
+            return render_template("ai_search_results.html", query=prompt, search_term=term,
+                                   categories=categories)
 
         intent, err = extract_assistant_intent(prompt)
         if err:

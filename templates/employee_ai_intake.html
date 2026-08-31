@@ -17,7 +17,7 @@
 </div>
 
 {% if not ai_configured %}
-<div class="card"><div class="compact-empty">Nog niet actief. Zet <code>SCHITTER_AI_API_KEY</code> in je lokale omgeving om dit te proberen (zie <code>.env.example</code>).</div></div>
+<div class="card"><div class="compact-empty">Nog niet actief. Zet <code>GROQ_API_KEY</code> en/of <code>GEMINI_API_KEY</code> in je lokale omgeving om dit te proberen (zie <code>.env.example</code>).</div></div>
 {% else %}
 <form method="post" class="card form-card">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
