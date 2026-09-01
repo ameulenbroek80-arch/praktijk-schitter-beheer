@@ -4502,6 +4502,15 @@ def login():
         _clear_login_failures(key)
         if user.get("totp_enabled") and not _device_is_trusted(user):
             session.clear()
+            # session.permanent=True zodat deze tussenstap een gewone cookie met
+            # een houdbaarheidsdatum krijgt (PERMANENT_SESSION_LIFETIME), i.p.v.
+            # een pure sessie-cookie zonder Max-Age. Zonder dit kunnen mobiele
+            # browsers (met name bij een geinstalleerde PWA) die cookie kwijtraken
+            # zodra je even naar de authenticator-app wisselt en terugkomt, waarna
+            # de 2FA-code niet meer wordt geaccepteerd. De eigenlijke geldigheids-
+            # duur van deze tussenstap blijft gewoon serverside beperkt tot
+            # PENDING_2FA_TTL_SECONDS (10 minuten), hieronder in login_2fa().
+            session.permanent = True
             session["pending_2fa_email"] = user["email"]
             session["pending_2fa_since"] = time.time()
             return redirect(url_for("login_2fa"))
