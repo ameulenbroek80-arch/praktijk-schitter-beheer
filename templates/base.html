@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Schitter Beheer">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ app_version }}">
 </head>
 <body>
 {% if session.get('user_email') %}
@@ -59,6 +59,7 @@
       </div>
       <div class="sidebar-user-actions">
         <a href="{{ url_for('account_password') }}" title="Wachtwoord wijzigen"><span aria-hidden="true">🔑</span><span class="sidebar-action-label">Wachtwoord</span></a>
+        <a href="{{ url_for('account_2fa') }}" title="Tweestapsverificatie"><span aria-hidden="true">{{ '🛡️' if current_user_totp_enabled else '⚠️' }}</span><span class="sidebar-action-label">2FA</span></a>
         <a href="{{ url_for('logout') }}" title="Afmelden"><span aria-hidden="true">↪</span><span class="sidebar-action-label">Uitloggen</span></a>
       </div>
     </div>
@@ -131,6 +132,29 @@
   });
 
   if (window.innerWidth <= 760 && sidebar) sidebar.setAttribute('aria-hidden', 'true');
+})();
+</script>
+<script>
+(function () {
+  // Volledige gebruikersnaam altijd tonen in de zijbalk: past de naam niet op
+  // één regel, dan wordt het lettertype stapsgewijs verkleind totdat het wel
+  // past (met een leesbare ondergrens). De CSS-ellipsis blijft als vangnet
+  // staan voor als JavaScript uit staat of een naam ook op de kleinste maat
+  // nog niet past.
+  var nameEl = document.querySelector('.sidebar-user-copy strong');
+  if (!nameEl) return;
+  var baseSize = parseFloat(getComputedStyle(nameEl).fontSize) || 15;
+  var minSize = 10;
+  function fitSidebarName() {
+    nameEl.style.fontSize = baseSize + 'px';
+    var size = baseSize;
+    while (nameEl.scrollWidth > nameEl.clientWidth && size > minSize) {
+      size -= 0.5;
+      nameEl.style.fontSize = size + 'px';
+    }
+  }
+  fitSidebarName();
+  window.addEventListener('resize', fitSidebarName);
 })();
 </script>
 <script>

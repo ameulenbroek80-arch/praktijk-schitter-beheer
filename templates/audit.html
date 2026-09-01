@@ -3,6 +3,40 @@
 {% block page_subtitle %}Wie deed wat, en wanneer. Laatste {{ entries|length }} van {{ total }} gebeurtenissen.{% endblock %}
 {% block content %}
 <div class="card">
+  <div class="card-header"><div><h2>Wie is er mogelijk nog actief</h2><p>Ruwe inschatting op basis van de auditlog hieronder — geen live sessieregistratie. Handig om een rustig moment te kiezen voor iets ingrijpends (zoals 2FA live zetten).</p></div></div>
+  {% if activity_rows %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Gebruiker</th><th>Laatste activiteit</th><th>Actie</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for r in activity_rows %}
+      <tr>
+        <td>{{ r.name }}</td>
+        <td>{{ r.last_action_at or '—' }}</td>
+        <td>{{ r.last_action or '—' }}</td>
+        <td>
+          {% if r.status == 'Mogelijk nog actief' %}
+          <span class="badge-pending" style="background:rgba(235,96,145,.14);color:#b73866">{{ r.status }}</span>
+          {% elif r.status == 'Uitgelogd' %}
+          <span class="badge-pending" style="background:rgba(23,165,163,.15);color:#0f6b69">{{ r.status }}</span>
+          {% else %}
+          <span class="badge-pending">{{ r.status }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">Let op: iemand die zijn browsertabblad openlaat zonder op "Uitloggen" te klikken, komt hier niet als
+    "Uitgelogd" te staan, ook al doet diegene even niets. "Mogelijk nog actief" is dus een voorzichtige inschatting,
+    geen garantie dat iemand wél of niet meer iets kan doen.</p>
+  {% else %}
+  <div class="compact-empty">Nog geen gebruikersactiviteit bekend.</div>
+  {% endif %}
+</div>
+
+<div class="card">
   <div class="card-header"><div><h2>Recente activiteit</h2><p>Meest recente eerst</p></div></div>
   {% if entries %}
   <div class="table-wrap">

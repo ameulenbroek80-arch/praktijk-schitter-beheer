@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block page_title %}Herstelcodes{% endblock %}
+{% block page_subtitle %}Bewaar deze codes veilig — ze worden maar één keer getoond.{% endblock %}
+{% block content %}
+<div class="card form-card" style="max-width:520px">
+  <div class="import-warning-box">
+    Dit zijn je {{ codes|length }} herstelcodes{{ ' (de oude codes werken vanaf nu niet meer)' if regenerated else '' }}.
+    Bewaar ze op een veilige plek (bijv. een wachtwoordmanager of afgedrukt in een kluis). Elke code werkt
+    maar één keer, als je geen toegang meer hebt tot je authenticator-app. Ze worden hierna nergens in
+    {{ app_name }} nog leesbaar getoond.
+  </div>
+  <div class="secret" style="display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;margin:18px 0;font-size:16px">
+    {% for c in codes %}<div>{{ c }}</div>{% endfor %}
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button class="btn secondary" type="button" onclick="downloadCodes()">Download als .txt</button>
+    <a class="btn primary" href="{{ url_for('account_2fa') }}">Ik heb ze bewaard, verdergaan</a>
+  </div>
+</div>
+<script>
+function downloadCodes(){
+  const codes = {{ codes | tojson }};
+  const text = "Praktijk Schitter Beheer — herstelcodes voor tweestapsverificatie\n"
+    + "Gegenereerd op " + new Date().toLocaleString('nl-NL') + "\n"
+    + "Elke code werkt maar één keer.\n\n"
+    + codes.join("\n") + "\n";
+  const blob = new Blob([text], {type: "text/plain"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = "herstelcodes-2fa.txt";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+</script>
+{% endblock %}

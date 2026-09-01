@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import csv
 import hashlib
+import hmac
 import html as html_lib
 import io
 import json
@@ -12,6 +13,7 @@ import re
 import secrets
 import shutil
 import smtplib
+import struct
 import sys
 import tempfile
 import threading
@@ -48,6 +50,17 @@ try:
     import docx as _docx_lib
 except ImportError:
     _docx_lib = None
+
+# Vendored QR-code-generator (map "segno" naast dit bestand) voor de koppel-QR bij
+# tweefactorauthenticatie. Bewust NIET als pip-dependency in requirements.txt gezet
+# (zie segno/VENDORED.md): START_WINDOWS.bat installeert requirements.txt alleen bij
+# de allereerste start, dus een nieuwe regel daarin zou bij bestaande installaties
+# niet vanzelf geinstalleerd worden. Ontbreekt de map toch, dan valt de koppelpagina
+# netjes terug op alleen de handmatige code (geen QR-afbeelding, geen crash).
+try:
+    import segno
+except ImportError:
+    segno = None
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -112,7 +125,15 @@ MAX_LOGIN_ATTEMPTS = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
 AUDIT_MAX_ENTRIES = 5000
-APP_VERSION = "2.8.0"
+TOTP_DIGITS = 6
+TOTP_PERIOD = 30
+TOTP_VALID_WINDOW = 1  # sta 1 stap (30s) voor/achter toe voor kloktolerantie
+TRUSTED_DEVICE_DAYS = 30
+TRUSTED_DEVICE_COOKIE = "psb_trusted_devices"
+RECOVERY_CODE_COUNT = 10
+RECOVERY_CODE_LOW_WARNING = 2
+PENDING_2FA_TTL_SECONDS = 10 * 60
+APP_VERSION = "2.9.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -159,6 +180,7 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # Zet SCHITTER_FORCE_HTTPS=1 zodra de app achter HTTPS draait (bijv. op een
 # domein), zodat sessiecookies nooit onversleuteld over het netwerk gaan.
 app.config["SESSION_COOKIE_SECURE"] = IS_PRODUCTION or os.environ.get("SCHITTER_FORCE_HTTPS") == "1"
+_COOKIE_SECURE = app.config["SESSION_COOKIE_SECURE"]
 
 
 # ---------- Encryptie / persistentie ----------
@@ -739,6 +761,10 @@ def load_users() -> list[dict]:
     for u in users:
         if not isinstance(u.get("roles"), list) or not u["roles"]:
             u["roles"] = [u.get("role") or "Beheerder"]
+        u.setdefault("totp_enabled", False)
+        u.setdefault("totp_secret_enc", None)
+        u.setdefault("totp_recovery_codes", [])
+        u.setdefault("trusted_devices", [])
     return users
 
 
@@ -748,6 +774,197 @@ def save_users(users: list[dict]) -> None:
         encoding="utf-8"
     )
 
+
+
+
+# ---------- Tweefactorauthenticatie (2FA / TOTP) ----------
+#
+# Verplicht voor iedereen (zie account_2fa* hieronder en enforce_2fa_setup):
+# de module Accounts & codes kan privacygevoelige inloggegevens bevatten, dus
+# elk account - beheerder of medewerker - moet 2FA koppelen voordat de rest
+# van de app toegankelijk is.
+#
+# Zelf geimplementeerd volgens RFC 6238 (TOTP) / RFC 4226 (HOTP) in plaats
+# van een pip-pakket zoals pyotp, om dezelfde reden als bij de QR-code
+# hierboven (segno): nieuwe requirements worden niet automatisch
+# geinstalleerd bij een bestaande lokale installatie. Geverifieerd tegen de
+# officiele RFC 6238-testvectoren (SHA1, 8 cijfers, secret
+# "12345678901234567890"). Het geheim wordt, net als de personeelsgegevens,
+# versleuteld met dezelfde Fernet-sleutel (_get_fernet) opgeslagen.
+
+def _totp_generate_secret() -> str:
+    return base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+
+
+def _totp_code(secret_b32: str, for_time: float, digits: int = TOTP_DIGITS, period: int = TOTP_PERIOD) -> str:
+    padded = secret_b32.upper() + "=" * ((8 - len(secret_b32) % 8) % 8)
+    key = base64.b32decode(padded)
+    counter = int(for_time // period)
+    msg = struct.pack(">Q", counter)
+    digest = hmac.new(key, msg, hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    code_int = (struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7fffffff) % (10 ** digits)
+    return str(code_int).zfill(digits)
+
+
+def _totp_verify(secret_b32: str, code: str, for_time: float | None = None) -> bool:
+    code = (code or "").strip().replace(" ", "")
+    if not code or not code.isdigit():
+        return False
+    if for_time is None:
+        for_time = time.time()
+    for step in range(-TOTP_VALID_WINDOW, TOTP_VALID_WINDOW + 1):
+        candidate = _totp_code(secret_b32, for_time + step * TOTP_PERIOD)
+        if secrets.compare_digest(candidate, code):
+            return True
+    return False
+
+
+def _totp_provisioning_uri(secret_b32: str, account_email: str) -> str:
+    issuer = load_settings().get("app_name") or "Praktijk Schitter Beheer"
+    label = quote(f"{issuer}:{account_email}", safe="")
+    return (
+        f"otpauth://totp/{label}?secret={secret_b32}&issuer={quote(issuer, safe='')}"
+        f"&algorithm=SHA1&digits={TOTP_DIGITS}&period={TOTP_PERIOD}"
+    )
+
+
+def _totp_qr_svg(uri: str) -> str | None:
+    """Inline SVG (geen <?xml>/namespace-header) van de koppel-QR, klaar om
+    direct in de pagina te zetten. Geeft None als segno ontbreekt of de
+    QR-generatie mislukt; de handmatige code blijft dan de enige koppelweg."""
+    if segno is None:
+        return None
+    try:
+        qr = segno.make(uri, error="m")
+        buf = io.BytesIO()
+        qr.save(buf, kind="svg", xmldecl=False, svgns=False, scale=6, border=2, dark="#17383a")
+        return buf.getvalue().decode("utf-8")
+    except Exception:
+        return None
+
+
+def _totp_decrypt_secret(user: dict) -> str | None:
+    enc = user.get("totp_secret_enc")
+    if not enc:
+        return None
+    try:
+        return _get_fernet().decrypt(enc.encode()).decode()
+    except (InvalidToken, ValueError):
+        return None
+
+
+def _totp_encrypt_secret(secret_b32: str) -> str:
+    return _get_fernet().encrypt(secret_b32.encode()).decode()
+
+
+# ---------- Herstelcodes ----------
+
+def _generate_recovery_codes(count: int = RECOVERY_CODE_COUNT) -> list[str]:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    codes = []
+    for _ in range(count):
+        a = "".join(secrets.choice(alphabet) for _ in range(4))
+        b = "".join(secrets.choice(alphabet) for _ in range(4))
+        codes.append(f"{a}-{b}")
+    return codes
+
+
+def _hash_recovery_codes(codes: list[str]) -> list[dict]:
+    return [{"hash": generate_password_hash(c), "used": False, "used_at": None} for c in codes]
+
+
+def _recovery_codes_remaining(user: dict) -> int:
+    return sum(1 for e in user.get("totp_recovery_codes", []) if not e.get("used"))
+
+
+# ---------- Vertrouwde apparaten ----------
+#
+# Bij "dit apparaat 30 dagen vertrouwen" komt er geen 2FA-geheim in de
+# cookie, maar een willekeurig token waarvan alleen de sha256-hash op het
+# account wordt bewaard (het token is al 128 bits willekeurig, dus een trage
+# KDF zoals bij wachtwoorden voegt hier niets toe). De cookie bevat een
+# lijstje zodat meerdere accounts op dezelfde computer (bijv. een balie-pc)
+# elk hun eigen vertrouwde status kunnen hebben.
+
+def _read_trust_cookie() -> list[dict]:
+    raw = request.cookies.get(TRUSTED_DEVICE_COOKIE, "")
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _device_is_trusted(user: dict) -> bool:
+    now = datetime.now()
+    for entry in _read_trust_cookie():
+        if entry.get("email") != user.get("email"):
+            continue
+        device_id, secret = entry.get("device_id", ""), entry.get("secret", "")
+        if not device_id or not secret:
+            continue
+        secret_hash = hashlib.sha256(secret.encode()).hexdigest()
+        for td in user.get("trusted_devices", []):
+            if td.get("id") != device_id:
+                continue
+            try:
+                if td.get("expires_at") and datetime.fromisoformat(td["expires_at"]) < now:
+                    continue
+            except ValueError:
+                continue
+            if secrets.compare_digest(td.get("secret_hash", ""), secret_hash):
+                return True
+    return False
+
+
+def _remember_trusted_device(resp, user_email: str, label: str) -> None:
+    """Voegt een vertrouwd-apparaat-record toe aan het account (aanroeper
+    moet al binnen @synchronized zitten en de gebruiker net hebben
+    geverifieerd) en zet de bijbehorende cookie op de response."""
+    device_id = secrets.token_hex(8)
+    device_secret = secrets.token_urlsafe(24)
+    users = load_users()
+    for u in users:
+        if u.get("email") == user_email:
+            devices = u.setdefault("trusted_devices", [])
+            devices.append({
+                "id": device_id,
+                "secret_hash": hashlib.sha256(device_secret.encode()).hexdigest(),
+                "label": label[:80],
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "expires_at": (datetime.now() + timedelta(days=TRUSTED_DEVICE_DAYS)).isoformat(timespec="seconds"),
+            })
+            # Nooit onbeperkt laten groeien: oudste eerst weg boven de 20.
+            u["trusted_devices"] = devices[-20:]
+    save_users(users)
+
+    cookie_entries = [e for e in _read_trust_cookie() if e.get("email") != user_email]
+    cookie_entries.append({"email": user_email, "device_id": device_id, "secret": device_secret})
+    resp.set_cookie(
+        TRUSTED_DEVICE_COOKIE, json.dumps(cookie_entries[-8:]),
+        max_age=TRUSTED_DEVICE_DAYS * 86400, httponly=True, samesite="Lax", secure=_COOKIE_SECURE,
+    )
+
+
+def _device_label_from_request() -> str:
+    ua = request.headers.get("User-Agent", "")
+    browser = "Onbekende browser"
+    for token, label in [("Edg/", "Edge"), ("Chrome/", "Chrome"), ("Firefox/", "Firefox"), ("Safari/", "Safari")]:
+        if token in ua:
+            browser = label
+            break
+    os_label = "Onbekend besturingssysteem"
+    for token, label in [
+        ("Windows", "Windows"), ("Mac OS X", "macOS"), ("Android", "Android"),
+        ("iPhone", "iPhone"), ("iPad", "iPad"), ("Linux", "Linux"),
+    ]:
+        if token in ua:
+            os_label = label
+            break
+    return f"{browser} op {os_label}"
 
 
 def _generate_setup_code() -> str:
@@ -906,6 +1123,7 @@ def inject_csrf():
 @app.context_processor
 def inject_app_configuration():
     settings = load_settings()
+    _cu = current_user() if "user_email" in session else None
     return {
         "app_name": settings.get("app_name", "Praktijk Schitter Beheer"),
         "app_subtitle": settings.get("app_subtitle", "Bedrijfsmiddelen, toegang & registraties"),
@@ -915,6 +1133,7 @@ def inject_app_configuration():
         "copyright_owner": COPYRIGHT_OWNER,
         "copyright_year": datetime.now().year,
         "ai_configured": _ai_configured(),
+        "current_user_totp_enabled": bool(_cu and _cu.get("totp_enabled")),
     }
 
 
@@ -929,6 +1148,29 @@ def csrf_protect():
             if "user_email" in session:
                 return redirect(request.referrer or url_for("dashboard"))
             return redirect(url_for("login"))
+    return None
+
+
+_TOTP_SETUP_EXEMPT_ENDPOINTS = {
+    "account_2fa", "account_2fa_enable", "account_2fa_reset",
+    "account_2fa_recovery_codes", "account_2fa_device_remove", "account_2fa_device_rename",
+    "logout", "static", "web_manifest",
+}
+
+
+@app.before_request
+def enforce_2fa_setup():
+    # Tweestapsverificatie is verplicht voor iedereen. Wie is ingelogd maar
+    # nog niet gekoppeld heeft, komt nergens anders dan de koppelpagina totdat
+    # dat is afgerond (met uitzondering van uitloggen en statische bestanden).
+    if request.endpoint is None or request.endpoint in _TOTP_SETUP_EXEMPT_ENDPOINTS:
+        return None
+    if "user_email" not in session:
+        return None
+    user = current_user()
+    if user and not user.get("totp_enabled"):
+        flash("Tweestapsverificatie is verplicht. Rond eerst het koppelen van je authenticator-app af.", "error")
+        return redirect(url_for("account_2fa"))
     return None
 
 
@@ -3685,6 +3927,29 @@ def user_reset_password(user_id):
     return redirect(url_for("settings_page"))
 
 
+@app.route("/settings/users/<user_id>/reset-2fa", methods=["POST"])
+@admin_required
+@synchronized
+def user_reset_2fa(user_id):
+    users = load_users()
+    target = next((u for u in users if u.get("id") == user_id), None)
+    if not target:
+        flash("Gebruiker niet gevonden.", "error")
+        return redirect(url_for("settings_page"))
+    if "Beheerder" in target.get("roles", []) and not verify_current_admin_password(request.form.get("admin_password", "")):
+        log_action("admin_2fa_reset_reauth_failed", detail=target.get("email", ""))
+        flash("Bevestig het resetten van 2FA voor een beheerder met je eigen huidige wachtwoord.", "error")
+        return redirect(url_for("settings_page"))
+    target["totp_enabled"] = False
+    target["totp_secret_enc"] = None
+    target["totp_recovery_codes"] = []
+    target["trusted_devices"] = []
+    save_users(users)
+    log_action("2fa_reset_admin", detail=target.get("email", ""))
+    flash(f"Tweestapsverificatie van {target.get('name','')} is gereset. Bij de eerstvolgende login moet diegene opnieuw koppelen.", "success")
+    return redirect(url_for("settings_page"))
+
+
 @app.route("/settings/users/<user_id>/edit-roles", methods=["POST"])
 @admin_required
 @synchronized
@@ -3904,11 +4169,68 @@ def settings_restore():
     return redirect(url_for("settings_page"))
 
 
+def _recent_activity_summary() -> list[dict]:
+    """Ruwe inschatting van wie er nog 'actief' zou kunnen zijn, puur op basis
+    van bestaande auditlog-gebeurtenissen - geen live sessieregistratie (die
+    bestaat niet in deze app). Sluiten van het browsertabblad zonder op
+    Uitloggen te klikken wordt hier niet in gezien; dit is een hulpmiddel om
+    een rustig moment te kiezen, geen garantie dat niemand meer iets kan doen."""
+    entries = load_module("audit")
+    last_action = {}
+    for e in entries:
+        name = e.get("user") or "systeem"
+        ts = e.get("timestamp", "")
+        if not ts:
+            continue
+        if name not in last_action or ts > last_action[name]["last_action_at"]:
+            last_action[name] = {"last_action_at": ts, "last_action": e.get("action", "")}
+
+    last_auth_state = {}
+    for e in sorted(entries, key=lambda x: x.get("timestamp", "")):
+        action = e.get("action", "")
+        name = e.get("user") or "systeem"
+        if action in ("login_success", "login_2fa_success", "login_2fa_recovery_used"):
+            last_auth_state[name] = "login"
+        elif action == "logout":
+            last_auth_state[name] = "logout"
+
+    now = datetime.now()
+    rows = []
+    for u in load_users():
+        name = u.get("name", "")
+        info = last_action.get(name)
+        if not info:
+            rows.append({"name": name, "last_action_at": "", "last_action": "", "status": "Geen activiteit bekend"})
+            continue
+        minutes_ago = None
+        try:
+            minutes_ago = int((now - datetime.fromisoformat(info["last_action_at"])).total_seconds() // 60)
+        except ValueError:
+            pass
+        if last_auth_state.get(name) == "logout":
+            status = "Uitgelogd"
+        elif minutes_ago is not None and minutes_ago > 8 * 60:
+            status = "Sessie waarschijnlijk verlopen"
+        elif minutes_ago is not None and minutes_ago <= 15:
+            status = "Mogelijk nog actief"
+        else:
+            status = "Al even niets gedaan"
+        rows.append({
+            "name": name, "last_action_at": info["last_action_at"], "last_action": info["last_action"],
+            "minutes_ago": minutes_ago, "status": status,
+        })
+    rows.sort(key=lambda r: r.get("last_action_at") or "", reverse=True)
+    return rows
+
+
 @app.route("/audit")
 @admin_required
 def audit_log():
     entries = sorted(load_module("audit"), key=lambda x: x.get("timestamp",""), reverse=True)
-    return render_template("audit.html", entries=entries[:300], total=len(entries))
+    return render_template(
+        "audit.html", entries=entries[:300], total=len(entries),
+        activity_rows=_recent_activity_summary(),
+    )
 
 
 @app.route("/account/wachtwoord", methods=["GET", "POST"])
@@ -3939,6 +4261,150 @@ def account_password():
             flash("Wachtwoord gewijzigd.", "success")
             return redirect(url_for("index"))
     return render_template("account_password.html")
+
+
+@app.route("/account/2fa")
+@login_required
+@synchronized
+def account_2fa():
+    user = current_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    if not user.get("totp_enabled"):
+        if not user.get("totp_secret_enc"):
+            secret = _totp_generate_secret()
+            users = load_users()
+            for u in users:
+                if u.get("email") == user["email"]:
+                    u["totp_secret_enc"] = _totp_encrypt_secret(secret)
+            save_users(users)
+            user = next(u for u in users if u.get("email") == user["email"])
+        secret = _totp_decrypt_secret(user)
+        uri = _totp_provisioning_uri(secret, user["email"]) if secret else ""
+        qr_svg = _totp_qr_svg(uri) if uri else None
+        secret_display = " ".join(secret[i:i + 4] for i in range(0, len(secret), 4)) if secret else ""
+        return render_template("account_2fa_setup.html", qr_svg=qr_svg, secret_display=secret_display, uri=uri)
+
+    devices = sorted(user.get("trusted_devices", []), key=lambda d: d.get("created_at", ""), reverse=True)
+    return render_template("account_2fa.html", devices=devices, recovery_remaining=_recovery_codes_remaining(user))
+
+
+@app.route("/account/2fa/enable", methods=["POST"])
+@login_required
+@synchronized
+def account_2fa_enable():
+    user = current_user()
+    if not user or user.get("totp_enabled"):
+        return redirect(url_for("account_2fa"))
+    secret = _totp_decrypt_secret(user)
+    code = request.form.get("code", "")
+    if not secret or not _totp_verify(secret, code):
+        log_action("2fa_enable_failed")
+        flash("De code klopt niet. Controleer of de tijd op je telefoon gelijk loopt en probeer het opnieuw.", "error")
+        return redirect(url_for("account_2fa"))
+
+    codes = _generate_recovery_codes()
+    users = load_users()
+    for u in users:
+        if u.get("email") == user["email"]:
+            u["totp_enabled"] = True
+            u["totp_recovery_codes"] = _hash_recovery_codes(codes)
+    save_users(users)
+    log_action("2fa_enabled")
+    flash("Tweestapsverificatie is ingeschakeld.", "success")
+    return render_template("account_2fa_recovery_codes.html", codes=codes, regenerated=False)
+
+
+@app.route("/account/2fa/reset", methods=["POST"])
+@login_required
+@synchronized
+def account_2fa_reset():
+    user = current_user()
+    if not user:
+        return redirect(url_for("login"))
+    if not check_password_hash(user["password_hash"], request.form.get("current_password", "")):
+        flash("Je huidige wachtwoord klopt niet.", "error")
+        return redirect(url_for("account_2fa"))
+
+    users = load_users()
+    for u in users:
+        if u.get("email") == user["email"]:
+            u["totp_enabled"] = False
+            u["totp_secret_enc"] = None
+            u["totp_recovery_codes"] = []
+            u["trusted_devices"] = []
+    save_users(users)
+    log_action("2fa_reset_self")
+    flash("Tweestapsverificatie is gereset. Koppel hieronder opnieuw een authenticator-app.", "success")
+    return redirect(url_for("account_2fa"))
+
+
+@app.route("/account/2fa/recovery-codes", methods=["POST"])
+@login_required
+@synchronized
+def account_2fa_recovery_codes():
+    user = current_user()
+    if not user or not user.get("totp_enabled"):
+        return redirect(url_for("account_2fa"))
+    if not check_password_hash(user["password_hash"], request.form.get("current_password", "")):
+        flash("Je huidige wachtwoord klopt niet.", "error")
+        return redirect(url_for("account_2fa"))
+
+    codes = _generate_recovery_codes()
+    users = load_users()
+    for u in users:
+        if u.get("email") == user["email"]:
+            u["totp_recovery_codes"] = _hash_recovery_codes(codes)
+    save_users(users)
+    log_action("2fa_recovery_codes_regenerated")
+    flash("Nieuwe herstelcodes gegenereerd. De oude codes werken niet meer.", "success")
+    return render_template("account_2fa_recovery_codes.html", codes=codes, regenerated=True)
+
+
+@app.route("/account/2fa/devices/<device_id>/remove", methods=["POST"])
+@login_required
+@synchronized
+def account_2fa_device_remove(device_id):
+    user = current_user()
+    if not user:
+        return redirect(url_for("login"))
+    users = load_users()
+    for u in users:
+        if u.get("email") == user["email"]:
+            u["trusted_devices"] = [d for d in u.get("trusted_devices", []) if d.get("id") != device_id]
+    save_users(users)
+    log_action("2fa_trusted_device_removed")
+    flash("Vertrouwd apparaat verwijderd.", "success")
+    return redirect(url_for("account_2fa"))
+
+
+@app.route("/account/2fa/devices/<device_id>/rename", methods=["POST"])
+@login_required
+@synchronized
+def account_2fa_device_rename(device_id):
+    user = current_user()
+    if not user:
+        return redirect(url_for("login"))
+    label = (request.form.get("label", "") or "").strip()
+    if not label:
+        flash("Geef een naam op voor dit apparaat.", "error")
+        return redirect(url_for("account_2fa"))
+    users = load_users()
+    found = False
+    for u in users:
+        if u.get("email") == user["email"]:
+            for d in u.get("trusted_devices", []):
+                if d.get("id") == device_id:
+                    d["label"] = label[:80]
+                    found = True
+    if found:
+        save_users(users)
+        log_action("2fa_trusted_device_renamed", detail=label[:80])
+        flash("Apparaatnaam bijgewerkt.", "success")
+    else:
+        flash("Apparaat niet gevonden.", "error")
+    return redirect(url_for("account_2fa"))
 
 
 @app.route("/onderdeel-uitgeschakeld")
@@ -4034,6 +4500,11 @@ def login():
             return render_template("login.html")
 
         _clear_login_failures(key)
+        if user.get("totp_enabled") and not _device_is_trusted(user):
+            session.clear()
+            session["pending_2fa_email"] = user["email"]
+            session["pending_2fa_since"] = time.time()
+            return redirect(url_for("login_2fa"))
         session.clear()
         session.permanent = True
         _ensure_csrf_token()
@@ -4065,6 +4536,93 @@ def logout():
         return render_template("logged_out.html")
 
     return redirect(url_for("login"))
+
+
+@app.route("/login/2fa", methods=["GET", "POST"])
+@synchronized
+def login_2fa():
+    email = session.get("pending_2fa_email")
+    since = session.get("pending_2fa_since", 0)
+    if not email or time.time() - since > PENDING_2FA_TTL_SECONDS:
+        had_pending = bool(email)
+        session.pop("pending_2fa_email", None)
+        session.pop("pending_2fa_since", None)
+        if had_pending:
+            flash("Deze verificatiestap is verlopen. Log opnieuw in.", "error")
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        key = f"{request.remote_addr}:{email}"
+        locked, wait_seconds = _is_locked_out(key)
+        if locked:
+            minutes = max(1, wait_seconds // 60 + 1)
+            flash(f"Te veel mislukte pogingen. Probeer het over {minutes} minuten opnieuw.", "error")
+            return render_template("login_2fa.html")
+
+        user = next((u for u in load_users() if u.get("email") == email), None)
+        if not user or not user.get("totp_enabled"):
+            session.pop("pending_2fa_email", None)
+            session.pop("pending_2fa_since", None)
+            return redirect(url_for("login"))
+
+        code = request.form.get("code", "")
+        secret = _totp_decrypt_secret(user)
+        ok = bool(secret) and _totp_verify(secret, code)
+        recovery_used = False
+
+        if not ok:
+            candidate = code.strip().replace(" ", "").upper()
+            if len(candidate) == 8 and "-" not in candidate:
+                candidate = candidate[:4] + "-" + candidate[4:]
+            if len(candidate) >= 9:
+                users = load_users()
+                for u in users:
+                    if u.get("email") != email:
+                        continue
+                    for entry in u.get("totp_recovery_codes", []):
+                        if entry.get("used"):
+                            continue
+                        if check_password_hash(entry["hash"], candidate):
+                            entry["used"] = True
+                            entry["used_at"] = datetime.now().isoformat(timespec="seconds")
+                            ok = True
+                            recovery_used = True
+                            break
+                    if ok:
+                        break
+                if ok:
+                    save_users(users)
+                    user = next((u for u in users if u.get("email") == email), user)
+
+        if not ok:
+            _register_login_failure(key)
+            log_action("login_2fa_failed", detail=email)
+            flash("De code klopt niet.", "error")
+            return render_template("login_2fa.html")
+
+        _clear_login_failures(key)
+        session.clear()
+        session.permanent = True
+        _ensure_csrf_token()
+        session["user_email"] = user["email"]
+        session["user_name"] = user["name"]
+        session["user_roles"] = user.get("roles", ["Beheerder"])
+        log_action("login_2fa_recovery_used" if recovery_used else "login_2fa_success", user=user["name"])
+
+        if "Beheerder" not in user.get("roles", []) and "Medewerker" in user.get("roles", []):
+            target = url_for("employee_portal")
+        else:
+            target = url_for("dashboard")
+        resp = redirect(target)
+        if request.form.get("trust_device") == "1" and not recovery_used:
+            _remember_trusted_device(resp, user["email"], _device_label_from_request())
+        if recovery_used:
+            remaining = sum(1 for e in user.get("totp_recovery_codes", []) if not e.get("used"))
+            if remaining <= RECOVERY_CODE_LOW_WARNING:
+                flash(f"Let op: je hebt nog maar {remaining} herstelcode(s) over. Genereer nieuwe via je account.", "error")
+        return resp
+
+    return render_template("login_2fa.html")
 
 
 # ---------- Dashboard / medewerkers ----------

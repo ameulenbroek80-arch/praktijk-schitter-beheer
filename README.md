@@ -336,3 +336,27 @@ De lokale 1.0 is bedoeld voor gebruik in een afgeschermde omgeving. Voor publica
 - Installeerbaar op ondersteunde mobiele, tablet- en desktopplatforms; iPhone/iPad krijgen Apple touch icon/meta.
 - Het gekozen Praktijk Schitter Beheer PWA-icoon is toegevoegd in 192, 512, maskable 512 en Apple touch formaat.
 - PWA-cache bevat uitsluitend statische huisstijlbestanden. Personeelsgegevens, accounts, API-responses en andere dynamische applicatiegegevens worden **niet offline gecachet**.
+
+## 2.9.0 – Tweestapsverificatie & overzichtelijke instellingen
+
+- **Tweestapsverificatie (2FA) verplicht voor elk account.** Koppelen gaat via
+  een QR-code (of een handmatige code) met elke standaard authenticator-app.
+  Wie nog niet gekoppeld heeft, komt na het inloggen nergens anders dan de
+  koppelpagina — dit geldt voor beheerders én medewerkers, omdat de module
+  Accounts & codes mogelijk privacygevoelige inloggegevens bevat.
+- Een apparaat kan 30 dagen vertrouwd worden. Zelf-beheer (koppelen,
+  herstelcodes, vertrouwde apparaten) staat onder het persoonlijke
+  accountmenu naast "Wachtwoord wijzigen"; een beheerder kan iemands 2FA
+  resetten via Instellingen → Gebruikers.
+- Bij het inschakelen worden 10 eenmalige herstelcodes getoond (downloadbaar
+  als .txt) voor als het toestel met de authenticator-app kwijt is. Het
+  TOTP-geheim wordt, net als de personeelsgegevens, versleuteld opgeslagen.
+- Nieuw in de auditlog: een overzicht "Wie is er mogelijk nog actief", een
+  ruwe inschatting op basis van recente activiteit — handig om een rustig
+  moment te kiezen voor iets ingrijpends.
+- De instellingenpagina is verdeeld over tabbladen (Algemeen, Modules,
+  E-mail, Gebruikers, Formulieren, Data & back-up) in plaats van één lange
+  pagina. Na opslaan blijft het actieve tabblad staan.
+- Statische bestanden (stylesheet) worden voortaan met een versie-querystring
+  geladen, zodat een nieuwe release altijd de actuele opmaak toont in plaats
+  van een gecachete oudere versie.

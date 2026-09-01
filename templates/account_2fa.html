@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block page_title %}Tweestapsverificatie{% endblock %}
+{% block page_subtitle %}Beheer je authenticator-app, herstelcodes en vertrouwde apparaten.{% endblock %}
+{% block content %}
+<div class="card form-card">
+  <p><span class="badge-pending" style="background:rgba(23,165,163,.15);color:#0f6b69">Actief</span></p>
+  <p class="hint">
+    Tweestapsverificatie is ingeschakeld voor dit account. Je hebt nog {{ recovery_remaining }} van de 10
+    herstelcodes over.
+    {% if recovery_remaining <= 2 %}Genereer hieronder nieuwe codes voordat ze op zijn.{% endif %}
+  </p>
+</div>
+
+<div class="card">
+  <div class="card-header"><div><h2>Vertrouwde apparaten</h2><p>Op deze apparaten wordt 30 dagen lang niet opnieuw om een code gevraagd</p></div></div>
+  <div class="record-list">
+    {% for d in devices %}
+    <div class="record-row">
+      <div><strong>{{ d.label or 'Onbekend apparaat' }}</strong><span>Toegevoegd op {{ d.created_at[:10] }}</span></div>
+      <div>Verloopt op {{ d.expires_at[:10] }}</div>
+      <div>
+        <button type="button" class="btn secondary tiny" onclick="document.getElementById('rename-{{ d.id }}').classList.toggle('open')">Naam wijzigen</button>
+      </div>
+      <form method="post" action="{{ url_for('account_2fa_device_remove', device_id=d.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="icon-btn danger" type="submit" title="Verwijderen">×</button>
+      </form>
+    </div>
+    <form id="rename-{{ d.id }}" class="inline-form reset-password-form" method="post" action="{{ url_for('account_2fa_device_rename', device_id=d.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Naam voor dit apparaat<input type="text" name="label" value="{{ d.label or '' }}" maxlength="80" required placeholder="Bijv. Laptop André"></label>
+      <button class="btn primary tiny" type="submit">Opslaan</button>
+    </form>
+    {% else %}
+    <p class="hint">Geen vertrouwde apparaten. Je krijgt dus bij elke login een code gevraagd.</p>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card form-card">
+  <h3>Nieuwe herstelcodes genereren</h3>
+  <p class="hint">De huidige 10 herstelcodes stoppen dan direct met werken.</p>
+  <form method="post" action="{{ url_for('account_2fa_recovery_codes') }}" class="form-grid single">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Bevestig met je huidige wachtwoord
+      <input type="password" name="current_password" required autocomplete="current-password">
+    </label>
+    <button class="btn secondary" type="submit">Nieuwe herstelcodes genereren</button>
+  </form>
+</div>
+
+<div class="card form-card danger-zone">
+  <h3>Opnieuw instellen</h3>
+  <p>Bijvoorbeeld bij een nieuwe telefoon: dit koppelt een nieuwe authenticator-app en maakt de huidige
+  herstelcodes en vertrouwde apparaten direct ongeldig.</p>
+  <form method="post" action="{{ url_for('account_2fa_reset') }}" class="form-grid single"
+        onsubmit="return confirm('Weet je het zeker? Je moet dan opnieuw koppelen met een authenticator-app.')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Bevestig met je huidige wachtwoord
+      <input type="password" name="current_password" required autocomplete="current-password">
+    </label>
+    <button class="btn danger" type="submit">Tweestapsverificatie opnieuw instellen</button>
+  </form>
+</div>
+{% endblock %}
