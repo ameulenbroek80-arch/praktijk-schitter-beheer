@@ -32,6 +32,7 @@
       {% if module_enabled('credentials') %}<a class="{{ 'active' if request.endpoint in ['credentials','credential_add','credential_reveal','credential_delete'] else '' }}" href="{{ url_for('credentials') }}">🔑 <span>Accounts & codes</span></a>{% endif %}
       {% if module_enabled('registrations') %}<a class="{{ 'active' if request.endpoint == 'registrations_overview' else '' }}" href="{{ url_for('registrations_overview') }}">🎓 <span>Registraties</span></a>{% endif %}
       {% if module_enabled('documents') %}<a class="{{ 'active' if request.endpoint == 'documents' else '' }}" href="{{ url_for('documents') }}">📄 <span>Documenten</span></a>{% endif %}
+      {% if module_enabled('orthotheek') %}<a class="{{ 'active' if request.endpoint in ['orthotheek_overview','orthotheek_detail'] else '' }}" href="{{ url_for('orthotheek_overview') }}">📚 <span>Orthotheek</span></a>{% endif %}
       {% if module_enabled('leave') %}<a class="{{ 'active' if request.endpoint in ['leave','leave_delete','leave_requests_admin'] else '' }}" href="{{ url_for('leave') }}">◷ <span>Verlof</span></a>{% endif %}
       {% if module_enabled('hours') %}<a class="{{ 'active' if request.endpoint == 'hours_admin' else '' }}" href="{{ url_for('hours_admin') }}">🕒 <span>Urenregistratie</span></a>{% endif %}
       {% if module_enabled('signals') %}<a class="{{ 'active' if request.endpoint in ['action_center','tasks','task_toggle','task_delete','offboarding_detail','offboarding_start','offboarding_toggle'] else '' }}" href="{{ url_for('action_center') }}">✦ <span>Actiecentrum</span></a>{% endif %}
@@ -39,9 +40,10 @@
       <a class="{{ 'active' if request.endpoint in ['settings_page','settings_import_excel','settings_import_excel_preview','settings_import_excel_confirm','user_add','user_delete','user_reset_password','user_edit_roles','settings_backup'] else '' }}" href="{{ url_for('settings_page') }}">⚙ <span>Instellingen</span></a>
       {% endif %}
       {% if 'Medewerker' in _roles %}
-      <a class="{{ 'active' if request.endpoint == 'employee_portal' else '' }}" href="{{ url_for('employee_portal') }}">⌂ <span>Mijn overzicht</span></a>
+      {% if module_enabled('employee_portal') %}<a class="{{ 'active' if request.endpoint == 'employee_portal' else '' }}" href="{{ url_for('employee_portal') }}">⌂ <span>Mijn overzicht</span></a>{% endif %}
       {% if module_enabled('hours') %}<a class="{{ 'active' if request.endpoint in ['my_hours','my_hours_delete'] else '' }}" href="{{ url_for('my_hours') }}">◷ <span>Mijn uren</span></a>{% endif %}
       {% if module_enabled('leave') %}<a class="{{ 'active' if request.endpoint == 'my_leave' else '' }}" href="{{ url_for('my_leave') }}">🌴 <span>Mijn verlof</span></a>{% endif %}
+      {% if module_enabled('orthotheek') and 'Beheerder' not in _roles %}<a class="{{ 'active' if request.endpoint in ['orthotheek_overview','orthotheek_detail'] else '' }}" href="{{ url_for('orthotheek_overview') }}">📚 <span>Orthotheek</span></a>{% endif %}
       {% endif %}
       <a class="{{ 'active' if request.endpoint == 'about_page' else '' }}" href="{{ url_for('about_page') }}">ⓘ <span>Over</span></a>
     </nav>

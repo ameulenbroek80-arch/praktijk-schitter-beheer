@@ -103,6 +103,18 @@
     {% else %}<div class="compact-empty">Nog geen registraties vastgelegd.</div>{% endif %}
   </div>
   {% endif %}
+  {% if module_enabled('orthotheek') %}
+  <div class="card">
+    <div class="card-header"><div><h2>Orthotheek</h2><p>Boeken die op jouw naam staan</p></div><a class="btn primary" href="{{ url_for('orthotheek_overview') }}">Naar de catalogus</a></div>
+    {% if my_books %}
+    <div class="record-list">
+      {% for b in my_books %}
+      <div class="record-row"><div><strong>{{ b.title }}</strong><span>{{ b.author or 'Auteur onbekend' }}</span></div><div>{{ b.category }}</div><div><a class="btn secondary tiny" href="{{ url_for('orthotheek_detail', book_id=b.id) }}">Openen</a></div></div>
+      {% endfor %}
+    </div>
+    {% else %}<div class="compact-empty">Je hebt op dit moment geen boeken uit de orthotheek geleend.</div>{% endif %}
+  </div>
+  {% endif %}
 </div>
 
 {% if module_enabled('credentials') and employee_credentials %}

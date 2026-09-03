@@ -360,3 +360,27 @@ De lokale 1.0 is bedoeld voor gebruik in een afgeschermde omgeving. Voor publica
 - Statische bestanden (stylesheet) worden voortaan met een versie-querystring
   geladen, zodat een nieuwe release altijd de actuele opmaak toont in plaats
   van een gecachete oudere versie.
+
+
+## 2.10.0 – Orthotheek: vakbibliotheek voor de praktijk
+
+- Nieuwe module **Orthotheek**: een centrale boekencatalogus met titel, auteur,
+  ISBN, uitgever, categorie en kamer/locatie (beide instelbaar via
+  Instellingen → Formulieren). Standaard uitgeschakeld, zoals elke module.
+- Automatische omslagfoto op basis van ISBN via Open Library en Google Books
+  (geen sleutel verplicht; optionele `SCHITTER_GOOGLE_BOOKS_API_KEY` voor een
+  hoger opzoekquotum, zie `.env.example`). Een eigen foto uploaden kan altijd
+  als terugvaloptie.
+- Uitlenen werkt zowel zelfbedienend via het medewerkersportaal ("Dit boek
+  lenen") als door een beheerder namens een medewerker ("Uitgeven aan
+  medewerker"), met dezelfde status- en geschiedenisopzet als Bedrijfsmiddelen.
+- **Excel-import**: meerdere boeken in één keer toevoegen via een
+  Excelbestand. Alleen een titelkolom is verplicht; ISBN, auteur, uitgever,
+  categorie, kamer en opmerkingen worden herkend als de koppen aanwezig zijn.
+  Een boek met een ISBN die al in de catalogus staat, wordt nooit dubbel
+  toegevoegd. Vóór schrijven wordt automatisch een herstelpunt gemaakt.
+- De opstartscripts (`START_WINDOWS.bat`, `START_MAC.command`) controleren
+  voortaan bij elke start of alle onderdelen uit `requirements.txt` nog
+  geïnstalleerd zijn, niet alleen bij het allereerste aanmaken van de
+  virtuele omgeving — een appupdate met een nieuwe afhankelijkheid werkt
+  daardoor voortaan vanzelf bij een gewone herstart.

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Import voltooid · {{ app_name }}{% endblock %}
+{% block page_title %}Boeken-import voltooid{% endblock %}
+{% block page_subtitle %}De boeken zijn gecontroleerd en toegevoegd aan de orthotheek.{% endblock %}
+{% block content %}
+<div class="card import-result-card">
+  <div class="card-header"><div><h2>Import geslaagd ✓</h2><p>Er is automatisch een herstelpunt gemaakt vóórdat de boekencatalogus is gewijzigd.</p></div></div>
+  <div class="import-summary-grid">
+    <div><strong>{{ result.new_books }}</strong><span>nieuwe boeken toegevoegd</span></div>
+  </div>
+  {% if result.skipped_existing_isbn %}
+  <div class="module-note">
+    Bestaand en veilig herkend: {{ result.skipped_existing_isbn }} boek(en) met een ISBN die al in de orthotheek stond, niet dubbel toegevoegd.
+  </div>
+  {% endif %}
+  {% if result.possible_duplicate_titles %}
+  <div class="import-warning-box">
+    <strong>Mogelijk dubbele titels</strong>
+    <p>Deze titels kwamen al voor in de orthotheek (zonder gelijke ISBN, dus wél toegevoegd — controleer of dit niet per ongeluk hetzelfde boek is): {{ result.possible_duplicate_titles | join(', ') }}</p>
+  </div>
+  {% endif %}
+  {% if result.warnings %}
+  <div class="import-warning-box">
+    <strong>Bronwaarschuwingen</strong>
+    {% for warning in result.warnings %}<p>⚠ {{ warning }}</p>{% endfor %}
+  </div>
+  {% endif %}
+  <div class="module-note">Herstelpunt op server: <strong>{{ result.backup_file }}</strong></div>
+  <div class="import-confirm-actions">
+    <a class="btn secondary" href="{{ url_for('orthotheek_import') }}">Nog een bestand importeren</a>
+    <a class="btn primary" href="{{ url_for('orthotheek_overview') }}">Bekijk orthotheek</a>
+  </div>
+</div>
+{% endblock %}

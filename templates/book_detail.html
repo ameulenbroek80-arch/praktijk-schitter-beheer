@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% from "_macros.html" import choice_field %}
+{% set is_admin_user = 'Beheerder' in session.get('user_roles', []) %}
+{% set can_manage_loan = is_admin_user or (current_employee and current_employee.id == book.borrowed_employee_id) %}
+{% block title %}{{ book.title }} · {{ app_name }}{% endblock %}
+{% block page_title %}{{ book.title }}{% endblock %}
+{% block page_subtitle %}{{ book.author or 'Auteur onbekend' }} · {{ book.status }}{% endblock %}
+{% block content %}
+<div class="detail-header card">
+  <div class="profile-head">
+    {% if book.cover_source == 'manual' %}
+      <img class="big-avatar-img" src="{{ url_for('orthotheek_cover', book_id=book.id) }}" alt="">
+    {% elif book.cover_url %}
+      <img class="big-avatar-img" src="{{ book.cover_url }}" alt="">
+    {% else %}
+      <div class="big-avatar">📖</div>
+    {% endif %}
+    <div><h2>{{ book.title }}</h2><p>{{ book.author or 'Auteur onbekend' }}{% if book.location %} · {{ book.location }}{% endif %}</p><span class="asset-status status-{{ book.status|lower|replace(' ','-') }}">{{ book.status }}</span></div>
+  </div>
+  <a class="btn secondary" href="{{ url_for('orthotheek_overview') }}">← Orthotheek</a>
+</div>
+
+<div class="detail-grid asset-detail-grid">
+  <div class="side-stack">
+    <div class="card">
+      <div class="card-header"><div><h2>Gegevens</h2><p>Titel, auteur en indeling</p></div></div>
+      {% if is_admin_user %}
+      <form class="inline-form" method="post" action="{{ url_for('orthotheek_edit', book_id=book.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid">
+          <label>Titel *<input name="title" value="{{ book.title }}" required></label>
+          <label>Auteur<input name="author" value="{{ book.author }}"></label>
+          <label>Uitgever<input name="publisher" value="{{ book.publisher }}"></label>
+          <label>ISBN<input name="isbn" value="{{ book.isbn }}"></label>
+          {{ choice_field('book_category', 'Categorie', settings.choice_lists.book_category, current_value=book.category, placeholder='Andere categorie') }}
+          {{ choice_field('book_location', 'Kamer / locatie', settings.choice_lists.book_location, current_value=book.location, placeholder='Andere kamer') }}
+        </div>
+        <label>Omslag-URL (automatisch gevonden via ISBN — alleen aanpassen indien nodig)<input name="cover_url" value="{{ book.cover_url if book.cover_source == 'auto' else '' }}" {{ 'disabled' if book.cover_source == 'manual' else '' }}></label>
+        {% if not book.borrowed_employee_id %}
+        <label>Status
+          <select name="status">{% for s in statuses %}{% if s != 'Uitgeleend' %}<option {{ 'selected' if book.status==s else '' }}>{{ s }}</option>{% endif %}{% endfor %}</select>
+        </label>
+        {% endif %}
+        <label>Notitie<textarea name="notes" rows="3">{{ book.notes }}</textarea></label>
+        <button class="btn primary">Gegevens opslaan</button>
+      </form>
+      {% else %}
+      <dl class="details-list wide">
+        <div><dt>Auteur</dt><dd>{{ book.author or '—' }}</dd></div>
+        <div><dt>Uitgever</dt><dd>{{ book.publisher or '—' }}</dd></div>
+        <div><dt>ISBN</dt><dd>{{ book.isbn or '—' }}</dd></div>
+        <div><dt>Categorie</dt><dd>{{ book.category }}</dd></div>
+        <div><dt>Kamer</dt><dd>{{ book.location or '—' }}</dd></div>
+        {% if book.notes %}<div><dt>Notitie</dt><dd>{{ book.notes }}</dd></div>{% endif %}
+      </dl>
+      {% endif %}
+    </div>
+
+    {% if is_admin_user %}
+    <div class="card">
+      <div class="card-header"><div><h2>Omslagfoto</h2><p>Automatisch via ISBN, of zelf een foto uploaden</p></div></div>
+      {% if book.cover_source == 'manual' %}
+        <img class="book-cover-preview-img" src="{{ url_for('orthotheek_cover', book_id=book.id) }}" alt="">
+      {% elif book.cover_url %}
+        <img class="book-cover-preview-img" src="{{ book.cover_url }}" alt="">
+      {% endif %}
+      <form class="inline-form" method="post" action="{{ url_for('orthotheek_cover_upload', book_id=book.id) }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Eigen omslagfoto uploaden (overschrijft de automatische omslag)<input type="file" name="cover" id="coverFileInput" accept=".jpg,.jpeg,.png,.webp,.gif"></label>
+        <button class="btn secondary" id="coverUploadBtn">Uploaden</button>
+      </form>
+      {% if book.cover_source == 'manual' %}
+      <form class="inline-form" method="post" action="{{ url_for('orthotheek_cover_delete', book_id=book.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn secondary tiny">Eigen foto verwijderen (terug naar automatisch)</button>
+      </form>
+      {% endif %}
+    </div>
+    <script>
+      (function(){
+        var input = document.getElementById('coverFileInput');
+        var btn = document.getElementById('coverUploadBtn');
+        if (input && btn) {
+          input.addEventListener('change', function(){
+            if (input.files && input.files.length > 0) {
+              btn.classList.remove('secondary');
+              btn.classList.add('primary');
+            } else {
+              btn.classList.remove('primary');
+              btn.classList.add('secondary');
+            }
+          });
+        }
+      })();
+    </script>
+    {% endif %}
+
+    <div class="card">
+      <div class="card-header"><div><h2>Uitleenhistorie</h2><p>Wie heeft dit boek wanneer geleend?</p></div></div>
+      {% if book.loan_history %}
+      <div class="timeline">
+        {% for h in book.loan_history|reverse %}
+        <div class="timeline-item">
+          <span class="timeline-dot"></span>
+          <div><strong>{{ h.employee_name }}</strong><p>{{ h.borrowed_at or 'Datum onbekend' }} → {{ h.returned_at or 'heden' }}</p></div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<div class="compact-empty">Dit boek is nog nooit uitgeleend.</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="side-stack">
+    <div class="card assignment-card">
+      <div class="card-header"><div><h2>Uitlenen</h2><p>Status van dit boek</p></div></div>
+      {% if book.borrowed_employee_id %}
+        <div class="assignment-current">
+          <div class="big-check">→</div>
+          <h3>{{ book.borrowed_employee_name }}</h3>
+          <p>Dit boek is momenteel uitgeleend.</p>
+        </div>
+        {% if can_manage_loan %}
+        <form class="inline-form" method="post" action="{{ url_for('orthotheek_return', book_id=book.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn primary">{{ 'Terugbrengen' if current_employee and current_employee.id == book.borrowed_employee_id else 'Retour nemen (beheerder)' }}</button>
+        </form>
+        {% endif %}
+      {% else %}
+        <div class="assignment-current free"><div class="big-check">✓</div><h3>Beschikbaar</h3><p>Status: {{ book.status }}</p></div>
+        {% if book.status == 'Beschikbaar' %}
+          {% if current_employee %}
+          <form class="inline-form" method="post" action="{{ url_for('orthotheek_borrow', book_id=book.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn primary">Dit boek lenen</button>
+          </form>
+          {% endif %}
+          {% if is_admin_user %}
+          <form class="inline-form" method="post" action="{{ url_for('orthotheek_assign', book_id=book.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>{{ 'Of geef uit aan een andere medewerker' if current_employee else 'Uitgeven aan medewerker' }}
+              <select name="employee_id" required><option value="">Kies medewerker…</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.first_name }} {{ e.last_name }}</option>{% endfor %}</select>
+            </label>
+            <button class="btn secondary">Uitgeven</button>
+          </form>
+          {% endif %}
+          {% if not current_employee and not is_admin_user %}
+          <p class="compact-empty">Alleen medewerkers met een eigen personeelsdossier kunnen zelf lenen.</p>
+          {% endif %}
+        {% endif %}
+      {% endif %}
+    </div>
+
+    {% if is_admin_user %}
+    <div class="card danger-zone">
+      <div class="card-header"><div><h2>Verwijderen</h2><p>Alleen voor foutief toegevoegde of definitief af te voeren boeken</p></div></div>
+      <form class="inline-form" method="post" action="{{ url_for('orthotheek_delete', book_id=book.id) }}" onsubmit="return confirm('Dit boek definitief verwijderen? De uitleenhistorie gaat dan ook verloren.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn danger" {{ 'disabled' if book.borrowed_employee_id else '' }}>Definitief verwijderen</button>
+        {% if book.borrowed_employee_id %}<small>Neem het boek eerst terug.</small>{% endif %}
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

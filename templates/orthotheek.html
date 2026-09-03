@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% from "_macros.html" import choice_field %}
+{% set is_admin_user = 'Beheerder' in session.get('user_roles', []) %}
+{% block title %}Orthotheek · {{ app_name }}{% endblock %}
+{% block page_title %}Orthotheek{% endblock %}
+{% block page_subtitle %}Vakbibliotheek: catalogus, uitlenen en terugbrengen.{% endblock %}
+{% block content %}
+<section class="stats-grid">
+  <div class="stat-card teal"><div class="stat-icon">📚</div><div><strong>{{ stats.total }}</strong><span>Totaal</span><small>boeken in de orthotheek</small></div></div>
+  <div class="stat-card aqua"><div class="stat-icon">✓</div><div><strong>{{ stats.available }}</strong><span>Beschikbaar</span><small>direct te leen</small></div></div>
+  <div class="stat-card pink"><div class="stat-icon">→</div><div><strong>{{ stats.borrowed }}</strong><span>Uitgeleend</span><small>momenteel bij een collega</small></div></div>
+</section>
+
+<div class="card">
+  <div class="card-header asset-toolbar">
+    <form class="search-form asset-search" method="get">
+      <input name="q" value="{{ q }}" placeholder="Zoek op titel, auteur, ISBN, uitgever…">
+      <select name="category">
+        <option value="">Alle categorieën</option>
+        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if category_filter==c else '' }}>{{ c }}</option>{% endfor %}
+      </select>
+      <select name="location">
+        <option value="">Alle kamers</option>
+        {% for l in locations %}<option value="{{ l }}" {{ 'selected' if location_filter==l else '' }}>{{ l }}</option>{% endfor %}
+      </select>
+      <select name="status">
+        <option value="">Alle statussen</option>
+        {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if status_filter==s else '' }}>{{ s }}</option>{% endfor %}
+      </select>
+      <button class="btn secondary">Filteren</button>
+    </form>
+    {% if is_admin_user %}
+    <a class="btn secondary" href="{{ url_for('orthotheek_import') }}">⇧ Excel importeren</a>
+    <button class="btn primary" type="button" onclick="document.getElementById('newBook').showModal()">＋ Nieuw boek</button>
+    {% endif %}
+  </div>
+
+  {% if books %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th></th>
+        <th>Titel</th>
+        <th>Categorie</th>
+        <th>Kamer</th>
+        <th>Status</th>
+        <th>Geleend door</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+      {% for b in books %}
+      <tr>
+        <td>
+          {% if b.cover_source == 'manual' %}
+            <img class="book-cover-thumb" src="{{ url_for('orthotheek_cover', book_id=b.id) }}" alt="">
+          {% elif b.cover_url %}
+            <img class="book-cover-thumb" src="{{ b.cover_url }}" alt="" loading="lazy">
+          {% else %}
+            <div class="book-cover-placeholder">📖</div>
+          {% endif %}
+        </td>
+        <td><strong>{{ b.title }}</strong><br><small>{{ b.author or 'Auteur onbekend' }}</small></td>
+        <td>{{ b.category }}</td>
+        <td>{{ b.location or '—' }}</td>
+        <td><span class="asset-status status-{{ b.status|lower|replace(' ','-') }}">{{ b.status }}</span></td>
+        <td>{{ b.borrowed_employee_name or '—' }}</td>
+        <td><a class="btn secondary tiny" href="{{ url_for('orthotheek_detail', book_id=b.id) }}">Openen</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state"><div class="empty-icon">📚</div><h3>Geen boeken gevonden</h3><p>{% if is_admin_user %}Voeg een boek toe of pas de filters aan.{% else %}Pas de filters aan, of vraag een beheerder om boeken toe te voegen.{% endif %}</p></div>
+  {% endif %}
+</div>
+
+{% if is_admin_user %}
+<dialog id="newBook" class="app-dialog">
+  <form method="post" action="{{ url_for('orthotheek_add') }}" id="newBookForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="dialog-head"><div><h2>Nieuw boek</h2><p>Voeg een boek toe aan de orthotheek.</p></div><button type="button" class="icon-btn" onclick="this.closest('dialog').close()">×</button></div>
+
+    <div class="form-grid">
+      <label>ISBN
+        <div class="secret-display">
+          <input name="isbn" id="newBookIsbn" placeholder="bijv. 9789023958624">
+          <button type="button" class="btn secondary tiny" id="isbnLookupBtn">Opzoeken</button>
+        </div>
+      </label>
+    </div>
+    <div id="isbnLookupStatus" class="module-note" hidden></div>
+
+    <div class="form-grid">
+      <label>Titel *<input name="title" id="newBookTitle" required></label>
+      <label>Auteur<input name="author" id="newBookAuthor"></label>
+      <label>Uitgever<input name="publisher" id="newBookPublisher"></label>
+      {{ choice_field('book_category', 'Categorie', settings.choice_lists.book_category, placeholder='Andere categorie') }}
+      {{ choice_field('book_location', 'Kamer / locatie', settings.choice_lists.book_location, placeholder='Andere kamer') }}
+    </div>
+    <div id="newBookCoverPreview" class="book-cover-preview" hidden><img id="newBookCoverImg" src="" alt="Gevonden omslag"></div>
+    <input type="hidden" name="cover_url" id="newBookCoverUrl">
+    <label>Notitie<textarea name="notes" rows="2" placeholder="Plek in de kast, bijzonderheden…"></textarea></label>
+    <div class="form-actions"><button type="button" class="btn secondary" onclick="this.closest('dialog').close()">Annuleren</button><button class="btn primary">Toevoegen</button></div>
+  </form>
+</dialog>
+<script>
+document.getElementById('isbnLookupBtn').addEventListener('click', async function () {
+  const isbn = document.getElementById('newBookIsbn').value.trim();
+  const statusEl = document.getElementById('isbnLookupStatus');
+  if (!isbn) { return; }
+  statusEl.hidden = false;
+  statusEl.textContent = 'Bezig met opzoeken…';
+  try {
+    const res = await fetch("{{ url_for('orthotheek_lookup') }}", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({csrf_token: '{{ csrf_token() }}', isbn: isbn}),
+    });
+    const data = await res.json();
+    if (data.found) {
+      if (data.title) document.getElementById('newBookTitle').value = data.title;
+      if (data.author) document.getElementById('newBookAuthor').value = data.author;
+      if (data.publisher) document.getElementById('newBookPublisher').value = data.publisher;
+      if (data.cover_url) {
+        document.getElementById('newBookCoverUrl').value = data.cover_url;
+        document.getElementById('newBookCoverImg').src = data.cover_url;
+        document.getElementById('newBookCoverPreview').hidden = false;
+        statusEl.textContent = 'Gevonden via ' + data.source + '. Controleer de velden voordat je opslaat.';
+      } else {
+        statusEl.textContent = 'Titel/auteur gevonden via ' + data.source + ', maar geen omslagfoto beschikbaar in deze bronnen. Je kunt na het toevoegen zelf een foto uploaden op de boekpagina.';
+      }
+    } else if (data.error) {
+      statusEl.textContent = 'Opzoeken is niet gelukt: ' + data.error;
+    } else {
+      statusEl.textContent = 'Niets gevonden voor dit ISBN — vul de gegevens zelf aan.';
+    }
+  } catch (err) {
+    statusEl.textContent = 'Opzoeken is niet gelukt (geen internetverbinding?). Vul de gegevens zelf aan.';
+  }
+});
+</script>
+{% endif %}
+{% endblock %}

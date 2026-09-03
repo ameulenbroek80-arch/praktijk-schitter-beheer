@@ -2,20 +2,33 @@
 setlocal
 cd /d "%~dp0"
 
-set "EXPECTED_VERSION=2.9.0"
+set "EXPECTED_VERSION=2.10.0"
 set "LOOPBACK=127.0.0.1"
 
 if not exist ".venv\Scripts\python.exe" (
   echo Eerste start: virtuele Python-omgeving wordt aangemaakt...
   py -m venv .venv
-  ".venv\Scripts\python.exe" -m pip install --upgrade pip
-  ".venv\Scripts\python.exe" -m pip install -r requirements.txt
   if errorlevel 1 (
     echo.
-    echo Installatie mislukt.
+    echo Aanmaken van de virtuele Python-omgeving is mislukt.
     pause
     exit /b 1
   )
+  ".venv\Scripts\python.exe" -m pip install --upgrade pip --quiet
+)
+
+rem Controleer bij elke start of alle benodigde onderdelen (uit requirements.txt)
+rem geinstalleerd zijn - niet alleen bij de allereerste keer. Onderdelen die al
+rem geinstalleerd zijn en aan requirements.txt voldoen, worden door pip
+rem overgeslagen zonder internetverbinding nodig te hebben; alleen een nieuw of
+rem gewijzigd onderdeel (zoals bij een appupdate) wordt dan alsnog opgehaald.
+".venv\Scripts\python.exe" -m pip install -r requirements.txt --quiet
+if errorlevel 1 (
+  echo.
+  echo Installatie van benodigde onderdelen is mislukt.
+  echo Controleer of dit apparaat verbinding heeft met internet en probeer opnieuw.
+  pause
+  exit /b 1
 )
 
 if not exist "storage" mkdir storage

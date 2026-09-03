@@ -1,18 +1,24 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 
-EXPECTED_VERSION="2.9.0"
+EXPECTED_VERSION="2.10.0"
 LOOPBACK="127.0.0.1"
 
 if [ ! -d ".venv" ]; then
   echo "Eerste start: virtuele Python-omgeving wordt aangemaakt..."
   python3 -m venv .venv || exit 1
   source .venv/bin/activate
-  python -m pip install --upgrade pip
-  pip install -r requirements.txt || exit 1
+  python -m pip install --upgrade pip --quiet
 else
   source .venv/bin/activate
 fi
+
+# Controleer bij elke start of alle benodigde onderdelen (uit requirements.txt)
+# geinstalleerd zijn - niet alleen bij de allereerste keer. Onderdelen die al
+# geinstalleerd zijn en aan requirements.txt voldoen, worden door pip
+# overgeslagen zonder internetverbinding nodig te hebben; alleen een nieuw of
+# gewijzigd onderdeel (zoals bij een appupdate) wordt dan alsnog opgehaald.
+pip install -r requirements.txt --quiet || exit 1
 
 APPPORT=$(python - <<'PY'
 import socket

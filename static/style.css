@@ -223,6 +223,14 @@ textarea{resize:vertical}.form-actions{display:flex;justify-content:flex-end;gap
 .status-reparatie{background:rgba(157,118,41,.15);color:var(--gold)}
 .status-afgeschreven{background:#edf0f1;color:#707b80}
 .status-kwijt{background:#fde9e9;color:#ad3030}
+.status-beschikbaar{background:rgba(23,165,163,.12);color:var(--teal)}
+.status-uitgeleend{background:rgba(235,96,145,.12);color:#bd3f6d}
+.status-vermist{background:#fde9e9;color:#ad3030}
+.book-cover-thumb{width:34px;height:48px;object-fit:cover;border-radius:4px;background:#eef4f4;display:block}
+.book-cover-placeholder{width:34px;height:48px;border-radius:4px;background:rgba(23,165,163,.1);color:var(--teal);display:grid;place-items:center;font-size:16px}
+.book-cover-preview{margin:10px 0}
+.book-cover-preview img{width:90px;height:128px;object-fit:cover;border-radius:6px;background:#eef4f4}
+.book-cover-preview-img{width:110px;height:156px;object-fit:cover;border-radius:8px;background:#eef4f4;display:block;margin-bottom:10px}
 .app-dialog{width:min(850px,calc(100vw - 30px));max-height:90vh;overflow:auto;border:0;border-radius:20px;padding:0;box-shadow:0 30px 100px rgba(20,40,45,.25)}
 .app-dialog::backdrop{background:rgba(22,35,39,.46)}
 .app-dialog>form{padding:24px;display:grid;gap:17px}

@@ -69,6 +69,7 @@ BASE_DIR = Path(__file__).resolve().parent
 # bijvoorbeeld /var/data. Zo blijft dezelfde code lokaal én online bruikbaar.
 STORAGE_DIR = Path(os.environ.get("SCHITTER_STORAGE_DIR", str(BASE_DIR / "storage"))).expanduser().resolve()
 DOCUMENTS_DIR = STORAGE_DIR / "documents"
+ORTHOTHEEK_COVERS_DIR = STORAGE_DIR / "orthotheek_covers"
 AUTH_FILE = STORAGE_DIR / "users.json"
 SETUP_CODE_FILE = STORAGE_DIR / "EERSTE_START_CODE.txt"
 KEY_FILE = STORAGE_DIR / ".data.key"
@@ -80,6 +81,7 @@ IMPORT_STAGE_PREFIX = "excel_import_stage_"
 
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
+ORTHOTHEEK_COVERS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Tijdelijke, versleutelde opslag voor AI-intakegegevens (ingetypte tekst en
 # door AI voorgestelde velden). Vervangt het doorgeven van deze gegevens via
@@ -117,6 +119,8 @@ CHOICE_LIST_FIELDS = [
     {"key": "os", "label": "Besturingssysteem"},
     {"key": "registration_type", "label": "Type opleiding/registratie"},
     {"key": "asset_type", "label": "Type bedrijfsmiddel"},
+    {"key": "book_category", "label": "Categorie boek (orthotheek)"},
+    {"key": "book_location", "label": "Kamer / locatie boek (orthotheek)"},
     {"key": "credential_category", "label": "Categorie account/code"},
     {"key": "credential_secret_type", "label": "Soort geheim"},
 ]
@@ -133,7 +137,7 @@ TRUSTED_DEVICE_COOKIE = "psb_trusted_devices"
 RECOVERY_CODE_COUNT = 10
 RECOVERY_CODE_LOW_WARNING = 2
 PENDING_2FA_TTL_SECONDS = 10 * 60
-APP_VERSION = "2.9.0"
+APP_VERSION = "2.10.0"
 COPYRIGHT_OWNER = "AM | Software as a Hobby"
 
 app = Flask(__name__)
@@ -309,6 +313,7 @@ def default_settings():
             "credentials": True,
             "registrations": True,
             "documents": True,
+            "orthotheek": False,
             "signals": True,
             "hr_employment": False,
             "hours": False,
@@ -349,6 +354,11 @@ def default_settings():
             "asset_type": [
                 "Telefoon", "Laptop", "Tablet", "Sleutel", "Toegangspas", "Token", "Monitor", "Overig",
             ],
+            "book_category": [
+                "Diagnostiek", "Behandelmethodieken", "Testmateriaal",
+                "Ontwikkelingsstoornissen", "Gedragsproblematiek", "Overig",
+            ],
+            "book_location": [],
             "credential_category": [
                 "Account", "Technische sleutel", "Licentie", "Toegangscode", "Overig",
             ],
@@ -448,6 +458,7 @@ MODULE_REGISTRY = [
     {"key":"credentials", "label":"Accounts & codes", "group":"Basis", "description":"Accounts, wachtwoorden, PIN/PUK, sleutels en herstelcodes."},
     {"key":"registrations", "label":"Registraties", "group":"Basis", "description":"SKJ, NVO, VOG, BHV en andere registraties met verloopdata."},
     {"key":"documents", "label":"Documenten", "group":"Basis", "description":"Versleutelde documenten in personeelsdossiers."},
+    {"key":"orthotheek", "label":"Orthotheek", "group":"Basis", "description":"Vakbibliotheek met boeken: catalogus met omslagfoto op basis van ISBN, categorieen en uitleen/terugbrengen."},
     {"key":"signals", "label":"Signaleringen & taken", "group":"Basis", "description":"Aandachtspunten, deadlines en taken."},
     {"key":"hr_employment", "label":"HR / dienstverband", "group":"HR", "description":"Uitgebreide contract- en dienstverbandgegevens."},
     {"key":"hours", "label":"Urenregistratie", "group":"HR", "description":"Urenregistratie voor medewerkers en beheerders."},
@@ -1799,12 +1810,12 @@ def _excel_import_target_files() -> list[Path]:
     ]
 
 
-def _create_excel_import_backup() -> Path:
+def _create_excel_import_backup(target_files: list[Path] | None = None) -> Path:
     backup_dir = STORAGE_DIR / "import_backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = backup_dir / f"before_excel_import_{stamp}.zip"
-    candidates = _excel_import_target_files()
+    candidates = target_files if target_files is not None else _excel_import_target_files()
     present = [file_path.name for file_path in candidates if file_path.exists()]
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("__manifest__.json", json.dumps({"present": present}, ensure_ascii=False))
@@ -1814,8 +1825,8 @@ def _create_excel_import_backup() -> Path:
     return path
 
 
-def _restore_excel_import_backup(path: Path) -> None:
-    candidates = _excel_import_target_files()
+def _restore_excel_import_backup(path: Path, target_files: list[Path] | None = None) -> None:
+    candidates = target_files if target_files is not None else _excel_import_target_files()
     with zipfile.ZipFile(path, "r") as zf:
         try:
             manifest = json.loads(zf.read("__manifest__.json").decode("utf-8"))
@@ -2546,6 +2557,811 @@ def asset_central_delete(asset_id):
     log_action("asset_deleted", detail=asset.get("name",""), target=asset_id)
     flash("Bedrijfsmiddel verwijderd.", "success")
     return redirect(url_for("assets_overview"))
+
+
+# ---------- Orthotheek ----------
+#
+# Vakbibliotheek: een centrale boekencatalogus met hetzelfde uitleen/retour-
+# patroon als Bedrijfsmiddelen (status + toewijzing + geschiedenis), maar dan
+# zelfbedieningsklaar voor iedere medewerker via het medewerkersportaal.
+# Boekgegevens zijn niet privacygevoelig, dus geen aparte encryptie-afweging
+# nodig - de opslag gaat net als bij de andere praktijkbrede modules via
+# load_module/save_module (books.enc, standaard Fernet-versleuteld net als
+# de rest van storage/).
+
+BOOK_STATUSES = ["Beschikbaar", "Uitgeleend", "Vermist"]
+
+
+def load_books():
+    data = load_module("books")
+    for book in data:
+        book.setdefault("title", "")
+        book.setdefault("author", "")
+        book.setdefault("isbn", "")
+        book.setdefault("publisher", "")
+        book.setdefault("category", "Overig")
+        book.setdefault("location", "")
+        book.setdefault("cover_url", "")
+        book.setdefault("cover_source", "")
+        book.setdefault("cover_upload", None)
+        book.setdefault("notes", "")
+        book.setdefault("status", "Beschikbaar")
+        book.setdefault("borrowed_employee_id", "")
+        book.setdefault("loan_history", [])
+        book.setdefault("created_at", "")
+        book.setdefault("updated_at", "")
+    return data
+
+
+def save_books(data):
+    save_module("books", data)
+
+
+def _search_books(q: str = ""):
+    """Filtert boeken op titel/auteur/ISBN/uitgever/categorie - gedeeld door
+    de catalogus en (eventueel later) de centrale AI-zoekassistent."""
+    books = load_books()
+    employees_map = {e["id"]: normalize_employee(e) for e in load_employees()}
+    q = (q or "").strip().lower()
+
+    rows = []
+    for book in books:
+        row = dict(book)
+        emp = employees_map.get(book.get("borrowed_employee_id"))
+        row["borrowed_employee_name"] = f"{emp.get('first_name','')} {emp.get('last_name','')}".strip() if emp else ""
+        haystack = " ".join([
+            book.get("title", ""), book.get("author", ""), book.get("isbn", ""),
+            book.get("publisher", ""), book.get("category", ""), book.get("location", ""),
+        ]).lower()
+        if q and q not in haystack:
+            continue
+        rows.append(row)
+    return rows
+
+
+def _lookup_open_library_book(isbn: str) -> dict:
+    """Zoekt titel/auteur/uitgever/omslag op via de gratis Open Library API
+    (geen API-key nodig). Faalt altijd netjes - nooit een crash - maar geeft,
+    anders dan eerst, wel het verschil door tussen 'echt niet gevonden' en
+    'opzoeken is mislukt' (foutmelding, quota, geen verbinding), zodat de
+    gebruiker in het scherm een eerlijke melding krijgt in plaats van
+    'niets gevonden' terwijl er eigenlijk iets misging."""
+    empty = {"found": False, "title": "", "author": "", "publisher": "", "cover_url": "", "source": "", "error": None}
+    url = f"https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data"
+    req = urllib.request.Request(url, headers={"User-Agent": AI_HTTP_USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return {**empty, "error": f"Open Library gaf een foutmelding terug ({exc.code})."}
+    except urllib.error.URLError as exc:
+        return {**empty, "error": f"Geen verbinding met Open Library: {exc.reason}"}
+    except Exception as exc:
+        return {**empty, "error": f"Onverwachte fout bij Open Library: {exc}"}
+    data = body.get(f"ISBN:{isbn}")
+    if not data:
+        return empty
+    authors = ", ".join(a.get("name", "") for a in data.get("authors", []) if a.get("name"))
+    publishers = ", ".join(p.get("name", "") for p in data.get("publishers", []) if p.get("name"))
+    cover = data.get("cover") or {}
+    cover_url = cover.get("large") or cover.get("medium") or ""
+    return {
+        "found": True, "title": data.get("title", ""), "author": authors,
+        "publisher": publishers, "cover_url": cover_url, "source": "Open Library", "error": None,
+    }
+
+
+def _lookup_google_books(isbn: str) -> dict:
+    """Zoekt titel/auteur/uitgever/omslag op via de gratis Google Books API.
+    Werkt ook zonder sleutel, maar Google geeft anonieme (sleutelloze)
+    verzoeken een laag, snel uitgeput quotum - dat leverde in de praktijk
+    al na een paar opzoekingen een 429 ("Too Many Requests") op, wat zonder
+    onderscheid als 'niets gevonden' aan de gebruiker werd getoond. Zet
+    optioneel SCHITTER_GOOGLE_BOOKS_API_KEY (gratis aan te maken, zie
+    .env.example) voor een veel hogere, stabiele limiet. Bredere dekking dan
+    Open Library voor vakliteratuur - gebruikt als aanvulling/terugval, niet
+    als eerste keuze."""
+    empty = {"found": False, "title": "", "author": "", "publisher": "", "cover_url": "", "source": "", "error": None}
+    url = f"https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}"
+    api_key = os.environ.get("SCHITTER_GOOGLE_BOOKS_API_KEY", "").strip()
+    if api_key:
+        url += f"&key={quote(api_key)}"
+    req = urllib.request.Request(url, headers={"User-Agent": AI_HTTP_USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            return {**empty, "error": "Google Books wijst het verzoek momenteel af (429, quotum bereikt). Dit gebeurt vooral zonder eigen API-sleutel - zie .env.example (SCHITTER_GOOGLE_BOOKS_API_KEY) voor een gratis, stabielere limiet."}
+        return {**empty, "error": f"Google Books gaf een foutmelding terug ({exc.code})."}
+    except urllib.error.URLError as exc:
+        return {**empty, "error": f"Geen verbinding met Google Books: {exc.reason}"}
+    except Exception as exc:
+        return {**empty, "error": f"Onverwachte fout bij Google Books: {exc}"}
+    items = body.get("items") or []
+    if not items:
+        return empty
+    info = items[0].get("volumeInfo", {})
+    authors = ", ".join(info.get("authors", []) or [])
+    cover_url = (info.get("imageLinks") or {}).get("thumbnail", "")
+    if cover_url.startswith("http://"):
+        cover_url = "https://" + cover_url[len("http://"):]
+    return {
+        "found": True, "title": info.get("title", ""), "author": authors,
+        "publisher": info.get("publisher", ""), "cover_url": cover_url, "source": "Google Books", "error": None,
+    }
+
+
+def _lookup_book_by_isbn(isbn: str) -> dict:
+    """Combineert beide bronnen: probeert eerst Open Library (direct, geen
+    sleutel), vult ontbrekende titel/auteur of omslag aan via Google Books
+    (bredere dekking, ook voor vakliteratuur). Geeft altijd een dict terug,
+    ook als er niets is gevonden - de gebruiker vult dan zelf de velden in.
+    Als geen van beide bronnen iets vindt EN een van beide gaf een echte
+    fout (quotum, geen verbinding, ...) i.p.v. een leeg resultaat, wordt die
+    foutmelding doorgegeven (via "error") zodat het scherm dat eerlijk kan
+    tonen in plaats van het te presenteren als 'dit boek bestaat niet'."""
+    empty = {"found": False, "title": "", "author": "", "publisher": "", "cover_url": "", "source": "", "error": None}
+    isbn_clean = re.sub(r"[^0-9Xx]", "", isbn or "").upper()
+    if not isbn_clean:
+        return empty
+
+    result = _lookup_open_library_book(isbn_clean)
+    if not result["found"]:
+        google_result = _lookup_google_books(isbn_clean)
+        if google_result["found"]:
+            return google_result
+        # Geen van beide gevonden - geef de meest informatieve fout door,
+        # als die er is (anders blijft het gewoon "niets gevonden").
+        combined_error = google_result.get("error") or result.get("error")
+        return {**google_result, "error": combined_error}
+    elif not result.get("cover_url"):
+        fallback = _lookup_google_books(isbn_clean)
+        if fallback.get("cover_url"):
+            result = dict(result)
+            result["cover_url"] = fallback["cover_url"]
+            result["source"] = f"{result['source']} + Google Books (omslag)"
+    return result
+
+
+BOOK_EXCEL_TITLE_HEADERS = ["titel", "titel boek", "boektitel", "boek", "naam", "naam boek", "title"]
+BOOK_EXCEL_ISBN_HEADERS = ["isbn", "isbn-13", "isbn13", "isbn-10", "isbn10"]
+BOOK_EXCEL_AUTHOR_HEADERS = ["auteur", "auteur(s)", "auteurs", "schrijver", "author", "authors"]
+BOOK_EXCEL_PUBLISHER_HEADERS = ["uitgever", "uitgeverij", "publisher"]
+BOOK_EXCEL_CATEGORY_HEADERS = ["categorie", "categorieen", "categorieën", "category"]
+BOOK_EXCEL_LOCATION_HEADERS = ["kamer", "locatie", "kamer/locatie", "ruimte", "location"]
+BOOK_EXCEL_NOTES_HEADERS = ["opmerking", "opmerkingen", "notitie", "notities", "notes"]
+
+
+def _normalize_isbn(isbn: str) -> str:
+    return re.sub(r"[^0-9Xx]", "", isbn or "").upper()
+
+
+def _find_book_excel_column(headers: dict, candidates: list) -> int | None:
+    """headers: {genormaliseerde headertekst: kolomnummer}. Eerst op exacte
+    match, anders op 'bevat', zodat bijvoorbeeld 'Titel boek' of 'ISBN-nummer'
+    ook herkend wordt zonder dat de gebruiker exact ons voorbeeld hoeft aan
+    te houden."""
+    for cand in candidates:
+        if cand in headers:
+            return headers[cand]
+    for header_text, col in headers.items():
+        for cand in candidates:
+            if cand in header_text:
+                return col
+    return None
+
+
+def _parse_book_excel(raw: bytes, filename: str) -> dict:
+    """Leest een Excelbestand met boeken in voor de orthotheek. In
+    tegenstelling tot het medewerkersimportformat (vast, één bekend
+    sjabloon) is dit bewust flexibel: de eerste rij wordt als koprij gelezen
+    en kolommen worden op naam herkend (titel verplicht, de rest optioneel),
+    zodat André's vrouw haar eigen Excel-overzicht van de praktijk kan
+    gebruiken zonder een vast sjabloon te moeten overnemen."""
+    if not filename.lower().endswith(".xlsx"):
+        raise ValueError("Alleen een .xlsx-bestand wordt geaccepteerd.")
+
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise ValueError(
+            "De Excel-importmodule is nog niet geïnstalleerd. Deploy deze versie opnieuw zodat requirements.txt wordt verwerkt."
+        ) from exc
+
+    try:
+        workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    except Exception as exc:
+        raise ValueError(f"Excelbestand kon niet veilig worden gelezen: {exc}") from exc
+
+    if not workbook.sheetnames:
+        raise ValueError("Excelbestand bevat geen werkblad.")
+    ws = workbook[workbook.sheetnames[0]]
+    if ws.max_row < 2:
+        raise ValueError("Excelbestand bevat geen boekregels onder de koprij.")
+
+    headers = {}
+    for col in range(1, (ws.max_column or 0) + 1):
+        text = _excel_cell_text(ws.cell(1, col)).strip().lower()
+        if text:
+            headers[text] = col
+
+    title_col = _find_book_excel_column(headers, BOOK_EXCEL_TITLE_HEADERS)
+    if not title_col:
+        found = ", ".join(sorted(headers.keys())) or "(geen koppen gevonden)"
+        raise ValueError(
+            "Kon geen kolom met boektitels herkennen. Geef de eerste rij kopnamen mee, bijvoorbeeld "
+            "'Titel' en optioneel 'ISBN', 'Auteur', 'Uitgever', 'Categorie', 'Kamer'. "
+            f"Gevonden koppen: {found}."
+        )
+    isbn_col = _find_book_excel_column(headers, BOOK_EXCEL_ISBN_HEADERS)
+    author_col = _find_book_excel_column(headers, BOOK_EXCEL_AUTHOR_HEADERS)
+    publisher_col = _find_book_excel_column(headers, BOOK_EXCEL_PUBLISHER_HEADERS)
+    category_col = _find_book_excel_column(headers, BOOK_EXCEL_CATEGORY_HEADERS)
+    location_col = _find_book_excel_column(headers, BOOK_EXCEL_LOCATION_HEADERS)
+    notes_col = _find_book_excel_column(headers, BOOK_EXCEL_NOTES_HEADERS)
+
+    entries = []
+    warnings = []
+    seen_isbns_in_file = {}
+    for row in range(2, ws.max_row + 1):
+        title = _excel_cell_text(ws.cell(row, title_col))
+        isbn = _excel_cell_text(ws.cell(row, isbn_col)) if isbn_col else ""
+        author = _excel_cell_text(ws.cell(row, author_col)) if author_col else ""
+        publisher = _excel_cell_text(ws.cell(row, publisher_col)) if publisher_col else ""
+        category = _excel_cell_text(ws.cell(row, category_col)) if category_col else ""
+        location = _excel_cell_text(ws.cell(row, location_col)) if location_col else ""
+        notes = _excel_cell_text(ws.cell(row, notes_col)) if notes_col else ""
+
+        if not any([title, isbn, author, publisher, category, location, notes]):
+            continue  # helemaal lege rij, geen waarschuwing nodig
+        if not title:
+            warnings.append(f"Rij {row}: geen titel ingevuld, deze regel is overgeslagen.")
+            continue
+
+        norm_isbn = _normalize_isbn(isbn)
+        if norm_isbn:
+            if norm_isbn in seen_isbns_in_file:
+                warnings.append(
+                    f"Rij {row}: ISBN {isbn} komt ook al voor op rij {seen_isbns_in_file[norm_isbn]} in dit bestand."
+                )
+            else:
+                seen_isbns_in_file[norm_isbn] = row
+
+        entries.append({
+            "title": title, "isbn": isbn, "author": author, "publisher": publisher,
+            "category": category, "location": location, "notes": notes, "source_row": row,
+        })
+
+    if not entries:
+        raise ValueError("Geen enkele regel met een titel gevonden onder de koprij.")
+
+    plan = {
+        "source_filename": filename,
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
+        "entries": entries,
+        "warnings": warnings,
+        "columns_found": {
+            "titel": True, "isbn": bool(isbn_col), "auteur": bool(author_col),
+            "uitgever": bool(publisher_col), "categorie": bool(category_col),
+            "kamer": bool(location_col), "opmerkingen": bool(notes_col),
+        },
+        "parsed_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    return plan
+
+
+def _apply_book_excel_plan(plan: dict) -> dict:
+    """Voegt de voorbereide boeken toe aan de orthotheek. Bestaande boeken
+    worden nooit overschreven: een regel met een ISBN die al in de
+    catalogus voorkomt, wordt overgeslagen (niet dubbel toegevoegd, en de
+    bestaande - mogelijk handmatig aangevulde - gegevens blijven ongemoeid).
+    Net als bij de medewerkersimport wordt pas een herstelpunt gemaakt en
+    geschreven nadat alle regels zijn voorbereid."""
+    now = datetime.now().isoformat(timespec="seconds")
+    books = load_books()
+    existing_isbns = {_normalize_isbn(b.get("isbn", "")) for b in books if b.get("isbn")}
+    existing_titles = {str(b.get("title", "")).strip().casefold() for b in books if b.get("title")}
+
+    new_books = []
+    skipped_existing_isbn = 0
+    possible_duplicate_titles = []
+
+    for entry in plan["entries"]:
+        norm_isbn = _normalize_isbn(entry.get("isbn", ""))
+        if norm_isbn and norm_isbn in existing_isbns:
+            skipped_existing_isbn += 1
+            continue
+
+        title_key = entry["title"].strip().casefold()
+        if title_key in existing_titles:
+            possible_duplicate_titles.append(entry["title"])
+        existing_titles.add(title_key)
+        if norm_isbn:
+            existing_isbns.add(norm_isbn)
+
+        new_books.append({
+            "id": str(uuid.uuid4()),
+            "title": entry["title"],
+            "author": entry.get("author", ""),
+            "isbn": entry.get("isbn", ""),
+            "publisher": entry.get("publisher", ""),
+            "category": entry.get("category") or "Overig",
+            "location": entry.get("location", ""),
+            "cover_url": "",
+            "cover_source": "",
+            "cover_upload": None,
+            "notes": entry.get("notes", ""),
+            "status": "Beschikbaar",
+            "borrowed_employee_id": "",
+            "loan_history": [],
+            "created_at": now,
+            "updated_at": now,
+        })
+
+    books_backup_targets = [STORAGE_DIR / "books.enc"]
+    backup_path = _create_excel_import_backup(target_files=books_backup_targets)
+    try:
+        save_books(books + new_books)
+    except Exception:
+        _restore_excel_import_backup(backup_path, target_files=books_backup_targets)
+        raise
+
+    return {
+        "new_books": len(new_books),
+        "skipped_existing_isbn": skipped_existing_isbn,
+        "possible_duplicate_titles": possible_duplicate_titles,
+        "backup_file": backup_path.name,
+        "warnings": plan.get("warnings", []),
+    }
+
+
+@app.route("/orthotheek")
+@login_required
+@module_required("orthotheek")
+def orthotheek_overview():
+    employee = get_employee_for_current_user()
+    q = request.args.get("q", "").strip().lower()
+    category_filter = request.args.get("category", "").strip()
+    location_filter = request.args.get("location", "").strip()
+    status_filter = request.args.get("status", "").strip()
+
+    rows = [
+        row for row in _search_books(q)
+        if (not category_filter or row.get("category") == category_filter)
+        and (not location_filter or row.get("location") == location_filter)
+        and (not status_filter or row.get("status") == status_filter)
+    ]
+    rows.sort(key=lambda b: (b.get("title") or "").lower())
+
+    all_books = load_books()
+    categories = sorted({b.get("category", "Overig") for b in all_books if b.get("category")})
+    locations = sorted({b.get("location", "") for b in all_books if b.get("location")})
+    stats = {
+        "total": len(all_books),
+        "available": sum(1 for b in all_books if b.get("status") == "Beschikbaar"),
+        "borrowed": sum(1 for b in all_books if b.get("status") == "Uitgeleend"),
+    }
+    return render_template(
+        "orthotheek.html", books=rows, categories=categories, locations=locations, statuses=BOOK_STATUSES,
+        stats=stats, q=q, category_filter=category_filter, location_filter=location_filter,
+        status_filter=status_filter, settings=load_settings(), employee=employee,
+    )
+
+
+@app.route("/orthotheek/lookup", methods=["POST"])
+@admin_required
+@module_required("orthotheek")
+def orthotheek_lookup():
+    isbn = request.form.get("isbn", "").strip()
+    if not isbn:
+        return jsonify({"found": False, "title": "", "author": "", "publisher": "", "cover_url": "", "source": "", "error": None})
+    result = _lookup_book_by_isbn(isbn)
+    log_action("book_isbn_lookup", detail=f"{isbn} ({result.get('source') or result.get('error') or 'niets gevonden'})")
+    return jsonify(result)
+
+
+@app.route("/orthotheek/add", methods=["POST"])
+@admin_required
+@module_required("orthotheek")
+@synchronized
+def orthotheek_add():
+    title = request.form.get("title", "").strip()
+    if not title:
+        flash("Geef het boek een titel.", "error")
+        return redirect(url_for("orthotheek_overview"))
+
+    books = load_books()
+    book = {
+        "id": str(uuid.uuid4()),
+        "title": title,
+        "author": request.form.get("author", "").strip(),
+        "isbn": request.form.get("isbn", "").strip(),
+        "publisher": request.form.get("publisher", "").strip(),
+        "category": _resolve_choice_field(request.form, "book_category") or "Overig",
+        "location": _resolve_choice_field(request.form, "book_location"),
+        "cover_url": request.form.get("cover_url", "").strip(),
+        "cover_source": "auto" if request.form.get("cover_url", "").strip() else "",
+        "cover_upload": None,
+        "notes": request.form.get("notes", "").strip(),
+        "status": "Beschikbaar",
+        "borrowed_employee_id": "",
+        "loan_history": [],
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    books.append(book)
+    save_books(books)
+    log_action("book_added", detail=title, target=book["id"])
+    flash("Boek toegevoegd aan de orthotheek.", "success")
+    return redirect(url_for("orthotheek_detail", book_id=book["id"]))
+
+
+@app.route("/orthotheek/import", methods=["GET"])
+@admin_required
+@module_required("orthotheek")
+def orthotheek_import():
+    return render_template("import_books_excel.html", preview=None)
+
+
+@app.route("/orthotheek/import/preview", methods=["POST"])
+@admin_required
+@module_required("orthotheek")
+@synchronized
+def orthotheek_import_preview():
+    uploaded = request.files.get("excel_file")
+    if not uploaded or not uploaded.filename:
+        flash("Kies eerst het Excelbestand.", "error")
+        return redirect(url_for("orthotheek_import"))
+
+    raw = uploaded.read()
+    if not raw:
+        flash("Het gekozen bestand is leeg.", "error")
+        return redirect(url_for("orthotheek_import"))
+
+    try:
+        plan = _parse_book_excel(raw, uploaded.filename)
+    except ValueError as exc:
+        log_action("book_excel_import_rejected", detail=str(exc)[:300])
+        flash(str(exc), "error")
+        return redirect(url_for("orthotheek_import"))
+
+    token = uuid.uuid4().hex
+    _save_encrypted(_new_import_stage_path(token), plan)
+
+    summary = {
+        "entries": len(plan["entries"]),
+        "source_filename": plan.get("source_filename", ""),
+        "source_sha256_short": plan.get("source_sha256", "")[:12],
+        "columns_found": plan.get("columns_found", {}),
+        "warnings": plan.get("warnings", []),
+    }
+    log_action("book_excel_import_previewed", detail=f"{len(plan['entries'])} boeken")
+    return render_template("import_books_excel.html", preview=summary, import_token=token)
+
+
+@app.route("/orthotheek/import/confirm", methods=["POST"])
+@admin_required
+@module_required("orthotheek")
+@synchronized
+def orthotheek_import_confirm():
+    token = request.form.get("import_token", "").strip()
+    stage_path = _new_import_stage_path(token)
+    if not token or not stage_path.exists():
+        flash("De importvoorbereiding is verlopen. Kies het Excelbestand opnieuw.", "error")
+        return redirect(url_for("orthotheek_import"))
+
+    try:
+        plan = _load_encrypted(stage_path, {})
+        if not isinstance(plan, dict) or not plan.get("entries"):
+            raise ValueError("De voorbereide import is ongeldig.")
+        result = _apply_book_excel_plan(plan)
+    except Exception as exc:
+        log_action("book_excel_import_failed", detail=str(exc)[:300])
+        flash(f"Import afgebroken: {exc}", "error")
+        return redirect(url_for("orthotheek_import"))
+    finally:
+        _delete_import_stage(token)
+
+    log_action(
+        "book_excel_import_completed",
+        detail=f"{result['new_books']} nieuw, {result['skipped_existing_isbn']} al aanwezig (ISBN) overgeslagen",
+    )
+    return render_template("import_books_excel_result.html", result=result)
+
+
+@app.route("/orthotheek/<book_id>")
+@login_required
+@module_required("orthotheek")
+def orthotheek_detail(book_id):
+    books = load_books()
+    book = next((b for b in books if b.get("id") == book_id), None)
+    if not book:
+        abort(404)
+    employees = sorted(
+        [normalize_employee(e) for e in load_employees()],
+        key=lambda e: (_last_name_sort_key(e.get("last_name", "")), e.get("first_name", "").lower())
+    )
+    employees_map = {e["id"]: e for e in employees}
+    book = dict(book)
+    emp = employees_map.get(book.get("borrowed_employee_id"))
+    book["borrowed_employee_name"] = f"{emp.get('first_name','')} {emp.get('last_name','')}".strip() if emp else ""
+    current_employee = get_employee_for_current_user()
+    return render_template(
+        "book_detail.html", book=book, statuses=BOOK_STATUSES,
+        settings=load_settings(), current_employee=current_employee, employees=employees,
+    )
+
+
+@app.route("/orthotheek/<book_id>/edit", methods=["POST"])
+@admin_required
+@module_required("orthotheek")
+@synchronized
+def orthotheek_edit(book_id):
+    books = load_books()
+    book = next((b for b in books if b.get("id") == book_id), None)
+    if not book:
+        abort(404)
+
+    title = request.form.get("title", "").strip()
+    if not title:
+        flash("Geef het boek een titel.", "error")
+        return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+    book["title"] = title
+    book["author"] = request.form.get("author", "").strip()
+    book["isbn"] = request.form.get("isbn", "").strip()
+    book["publisher"] = request.form.get("publisher", "").strip()
+    book["category"] = _resolve_choice_field(request.form, "book_category") or book.get("category") or "Overig"
+    book["location"] = _resolve_choice_field(request.form, "book_location") or book.get("location", "")
+    book["notes"] = request.form.get("notes", "").strip()
+
+    new_cover_url = request.form.get("cover_url", "").strip()
+    if new_cover_url and book.get("cover_source") != "manual":
+        book["cover_url"] = new_cover_url
+        book["cover_source"] = "auto"
+
+    if not book.get("borrowed_employee_id"):
+        requested_status = request.form.get("status", book.get("status", "Beschikbaar")).strip()
+        if requested_status in BOOK_STATUSES and requested_status != "Uitgeleend":
+            book["status"] = requested_status
+
+    book["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    save_books(books)
+    log_action("book_updated", detail=title, target=book_id)
+    flash("Boek bijgewerkt.", "success")
+    return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+
+@app.route("/orthotheek/<book_id>/delete", methods=["POST"])
+@admin_required
+@module_required("orthotheek")
+@synchronized
+def orthotheek_delete(book_id):
+    books = load_books()
+    book = next((b for b in books if b.get("id") == book_id), None)
+    if not book:
+        abort(404)
+    if book.get("borrowed_employee_id"):
+        flash("Een uitgeleend boek kan niet worden verwijderd. Neem het eerst terug.", "error")
+        return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+    if book.get("cover_upload"):
+        try:
+            (ORTHOTHEEK_COVERS_DIR / book["cover_upload"]["stored_name"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    books = [b for b in books if b.get("id") != book_id]
+    save_books(books)
+    log_action("book_deleted", detail=book.get("title", ""), target=book_id)
+    flash("Boek verwijderd uit de orthotheek.", "success")
+    return redirect(url_for("orthotheek_overview"))
+
+
+@app.route("/orthotheek/<book_id>/borrow", methods=["POST"])
+@login_required
+@module_required("orthotheek")
+@synchronized
+def orthotheek_borrow(book_id):
+    employee = get_employee_for_current_user()
+    if not employee:
+        flash("Alleen medewerkers met een eigen personeelsdossier kunnen een boek lenen.", "error")
+        return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+    books = load_books()
+    book = next((b for b in books if b.get("id") == book_id), None)
+    if not book:
+        abort(404)
+    if book.get("status") != "Beschikbaar" or book.get("borrowed_employee_id"):
+        flash("Dit boek is niet beschikbaar.", "error")
+        return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+    employee_name = f"{employee.get('first_name','')} {employee.get('last_name','')}".strip()
+    book["borrowed_employee_id"] = employee["id"]
+    book["status"] = "Uitgeleend"
+    book.setdefault("loan_history", []).append({
+        "employee_id": employee["id"],
+        "employee_name": employee_name,
+        "borrowed_at": date.today().isoformat(),
+        "returned_at": "",
+    })
+    book["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    save_books(books)
+    log_action("book_borrowed", detail=f"{book.get('title','')} -> {employee_name}", target=book_id)
+    flash(f"'{book.get('title','')}' staat nu op jouw naam geleend.", "success")
+    return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+
+@app.route("/orthotheek/<book_id>/assign", methods=["POST"])
+@admin_required
+@module_required("orthotheek")
+@synchronized
+def orthotheek_assign(book_id):
+    """Laat een beheerder een boek direct aan een gekozen medewerker
+    uitgeven - los van orthotheek_borrow (dat is de zelfbedieningsknop voor
+    de ingelogde medewerker zelf). Nodig omdat niet elke beheerder ook zelf
+    als medewerker gekoppeld is, en niet elke medewerker per se een eigen
+    portaalaccount heeft - dan moet de beheerder het kunnen registreren."""
+    books = load_books()
+    book = next((b for b in books if b.get("id") == book_id), None)
+    if not book:
+        abort(404)
+    if book.get("borrowed_employee_id"):
+        flash("Dit boek is al uitgeleend. Neem het eerst terug.", "error")
+        return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+    employee_id = request.form.get("employee_id", "").strip()
+    employee = find_employee(employee_id)
+    if not employee:
+        flash("Kies een geldige medewerker.", "error")
+        return redirect(url_for("orthotheek_detail", book_id=book_id))
+    employee = normalize_employee(employee)
+    employee_name = f"{employee.get('first_name','')} {employee.get('last_name','')}".strip()
+
+    book["borrowed_employee_id"] = employee_id
+    book["status"] = "Uitgeleend"
+    book.setdefault("loan_history", []).append({
+        "employee_id": employee_id,
+        "employee_name": employee_name,
+        "borrowed_at": date.today().isoformat(),
+        "returned_at": "",
+    })
+    book["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    save_books(books)
+    log_action("book_borrowed", detail=f"{book.get('title','')} -> {employee_name} (door beheerder)", target=book_id)
+    flash(f"'{book.get('title','')}' is uitgegeven aan {employee_name}.", "success")
+    return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+
+@app.route("/orthotheek/<book_id>/return", methods=["POST"])
+@login_required
+@module_required("orthotheek")
+@synchronized
+def orthotheek_return(book_id):
+    books = load_books()
+    book = next((b for b in books if b.get("id") == book_id), None)
+    if not book:
+        abort(404)
+
+    employee = get_employee_for_current_user()
+    borrower_id = book.get("borrowed_employee_id")
+    if not borrower_id:
+        flash("Dit boek is niet uitgeleend.", "error")
+        return redirect(url_for("orthotheek_detail", book_id=book_id))
+    if not is_admin() and (not employee or employee["id"] != borrower_id):
+        flash("Je kunt alleen boeken terugbrengen die op jouw naam staan.", "error")
+        return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+    history = book.setdefault("loan_history", [])
+    for item in reversed(history):
+        if item.get("employee_id") == borrower_id and not item.get("returned_at"):
+            item["returned_at"] = date.today().isoformat()
+            break
+
+    book_title = book.get("title", "")
+    book["borrowed_employee_id"] = ""
+    book["status"] = "Beschikbaar"
+    book["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    save_books(books)
+    log_action("book_returned", detail=book_title, target=book_id)
+    flash(f"'{book_title}' is terug in de orthotheek.", "success")
+    return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+
+@app.route("/orthotheek/<book_id>/cover/upload", methods=["POST"])
+@admin_required
+@module_required("orthotheek")
+@synchronized
+def orthotheek_cover_upload(book_id):
+    books = load_books()
+    book = next((b for b in books if b.get("id") == book_id), None)
+    if not book:
+        abort(404)
+
+    uploaded = request.files.get("cover")
+    if not uploaded or not uploaded.filename:
+        flash("Kies eerst een afbeelding.", "error")
+        return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+    ext = uploaded.filename.rsplit(".", 1)[-1].lower() if "." in uploaded.filename else ""
+    if ext not in ALLOWED_PHOTO_EXTENSIONS:
+        flash("Gebruik een JPG, PNG, WEBP of GIF voor de omslagfoto.", "error")
+        return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+    content_type = uploaded.mimetype or mimetypes.guess_type(uploaded.filename)[0] or "image/jpeg"
+    raw = uploaded.read()
+
+    old_upload = book.get("cover_upload")
+    if old_upload and old_upload.get("stored_name"):
+        try:
+            (ORTHOTHEEK_COVERS_DIR / old_upload["stored_name"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    stored_name = f"cover_{uuid.uuid4().hex}.enc"
+    (ORTHOTHEEK_COVERS_DIR / stored_name).write_bytes(_get_fernet().encrypt(raw))
+
+    book["cover_upload"] = {
+        "stored_name": stored_name,
+        "content_type": content_type,
+        "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    book["cover_source"] = "manual"
+    book["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    save_books(books)
+    log_action("book_cover_uploaded", detail=book.get("title", ""), target=book_id)
+    flash("Omslagfoto bijgewerkt.", "success")
+    return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+
+@app.route("/orthotheek/<book_id>/cover/delete", methods=["POST"])
+@admin_required
+@module_required("orthotheek")
+@synchronized
+def orthotheek_cover_delete(book_id):
+    books = load_books()
+    book = next((b for b in books if b.get("id") == book_id), None)
+    if not book:
+        abort(404)
+
+    old_upload = book.get("cover_upload")
+    if old_upload and old_upload.get("stored_name"):
+        try:
+            (ORTHOTHEEK_COVERS_DIR / old_upload["stored_name"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+    book["cover_upload"] = None
+    book["cover_source"] = "auto" if book.get("cover_url") else ""
+    book["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    save_books(books)
+    log_action("book_cover_deleted", detail=book.get("title", ""), target=book_id)
+    flash("Omslagfoto verwijderd.", "success")
+    return redirect(url_for("orthotheek_detail", book_id=book_id))
+
+
+@app.route("/orthotheek/<book_id>/cover")
+@login_required
+@module_required("orthotheek")
+def orthotheek_cover(book_id):
+    books = load_books()
+    book = next((b for b in books if b.get("id") == book_id), None)
+    if not book:
+        abort(404)
+    upload = book.get("cover_upload")
+    if not upload or not upload.get("stored_name"):
+        abort(404)
+    file_path = ORTHOTHEEK_COVERS_DIR / upload["stored_name"]
+    if not file_path.exists():
+        abort(404)
+    try:
+        content = _get_fernet().decrypt(file_path.read_bytes())
+    except InvalidToken:
+        abort(500)
+    response = Response(content, mimetype=upload.get("content_type") or "image/jpeg")
+    response.headers["Cache-Control"] = "private, max-age=300"
+    return response
+
 
 
 
@@ -6744,10 +7560,22 @@ def employee_portal():
         ]
         employee_registrations.sort(key=lambda r: r.get("expires_at") or "9999-12-31")
 
+    # Eigen geleende boeken uit de orthotheek: alleen relevant als die module
+    # aanstaat - net als de andere secties hierboven, hergebruikt de al
+    # bestaande zoekfunctie zodat de logica op precies een plek staat.
+    my_books = []
+    if module_enabled("orthotheek"):
+        my_books = [
+            b for b in load_books()
+            if b.get("borrowed_employee_id") == employee["id"]
+        ]
+        my_books.sort(key=lambda b: (b.get("title") or "").lower())
+
     return render_template(
         "employee_portal.html", employee=employee, entries=entries[:8],
         requests=requests[:8], balance=balance, total_recent_hours=total_recent_hours,
         employee_credentials=employee_credentials, employee_registrations=employee_registrations,
+        my_books=my_books,
     )
 
 

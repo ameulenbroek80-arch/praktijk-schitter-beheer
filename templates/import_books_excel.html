@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Boeken importeren · {{ app_name }}{% endblock %}
+{% block page_title %}Boeken importeren{% endblock %}
+{% block page_subtitle %}Voeg in één keer meerdere boeken toe aan de orthotheek via een Excelbestand.{% endblock %}
+{% block content %}
+<div class="detail-grid">
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <h2>Bronbestand controleren</h2>
+        <p>Er wordt niets gewijzigd zolang de controle niet is bekeken en bevestigd.</p>
+      </div>
+    </div>
+    {% if not preview %}
+    <form class="form-grid import-upload-form" method="post" enctype="multipart/form-data" action="{{ url_for('orthotheek_import_preview') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="full">Excelbestand (.xlsx)
+        <input type="file" name="excel_file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+        <small>De eerste rij moet kopnamen bevatten, bijvoorbeeld "Titel" (verplicht) en optioneel "ISBN", "Auteur", "Uitgever", "Categorie", "Kamer", "Opmerkingen". Het bestand wordt alleen tijdelijk verwerkt.</small>
+      </label>
+      <div class="full"><button class="btn primary" type="submit">Bestand controleren</button></div>
+    </form>
+    {% else %}
+    <div class="import-summary-grid">
+      <div><strong>{{ preview.entries }}</strong><span>boeken gevonden</span></div>
+    </div>
+    <div class="module-note">
+      <strong>Bestand gecontroleerd:</strong> {{ preview.source_filename }} · controlecode {{ preview.source_sha256_short }}
+    </div>
+    <div class="module-note">
+      <strong>Herkende kolommen:</strong>
+      Titel{{ ' · ISBN' if preview.columns_found.isbn }}{{ ' · Auteur' if preview.columns_found.auteur }}{{ ' · Uitgever' if preview.columns_found.uitgever }}{{ ' · Categorie' if preview.columns_found.categorie }}{{ ' · Kamer' if preview.columns_found.kamer }}{{ ' · Opmerkingen' if preview.columns_found.opmerkingen }}
+    </div>
+    {% if preview.warnings %}
+    <div class="import-warning-box">
+      <strong>Bronwaarschuwingen</strong>
+      {% for warning in preview.warnings %}<p>⚠ {{ warning }}</p>{% endfor %}
+      <small>Dit zijn geen importfouten. Regels zonder titel worden overgeslagen; de rest wordt exact uit het Excelbestand overgenomen.</small>
+    </div>
+    {% endif %}
+    <form method="post" action="{{ url_for('orthotheek_import_confirm') }}" onsubmit="return confirm('De gecontroleerde boeken nu toevoegen aan de orthotheek? Er wordt automatisch een herstelpunt gemaakt.')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="import_token" value="{{ import_token }}">
+      <div class="import-confirm-actions">
+        <a class="btn secondary" href="{{ url_for('orthotheek_import') }}">Annuleren</a>
+        <button class="btn primary" type="submit">Boeken importeren</button>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div><h2>Hoe werkt dit?</h2></div></div>
+    <div class="import-map">
+      <div><strong>Titel</strong><span>Verplicht. Regels zonder titel worden overgeslagen.</span></div>
+      <div><strong>ISBN</strong><span>Optioneel. Een boek met een ISBN die al in de orthotheek voorkomt, wordt niet dubbel toegevoegd.</span></div>
+      <div><strong>Auteur, uitgever, categorie, kamer, opmerkingen</strong><span>Optioneel, worden overgenomen als de kolom herkend wordt.</span></div>
+      <div><strong>Omslagfoto</strong><span>Wordt bij een import niet automatisch opgehaald (om de gratis ISBN-opzoekdienst niet te snel uit te putten). Zoek de omslag na de import per boek op via de knop "Opzoeken" op de boekpagina.</span></div>
+    </div>
+    <div class="module-note">
+      <strong>Veiligheidsregels:</strong> bestaande boeken worden nooit overschreven of dubbel toegevoegd (herkend via ISBN); vóór schrijven wordt een herstelpunt gemaakt.
+    </div>
+  </div>
+</div>
+{% endblock %}
